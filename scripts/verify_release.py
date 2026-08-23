@@ -1466,6 +1466,28 @@ def _metadata_version(body: bytes, *, label: str, expected_version: str) -> None
         )
 
 
+
+def _first_metadata_divergence(expected: bytes, actual: bytes) -> str:
+    """Describe the first line where two METADATA blobs differ, for an actionable failure."""
+    expected_lines = expected.split(b"\r\n")
+    actual_lines = actual.split(b"\r\n")
+    for index in range(max(len(expected_lines), len(actual_lines))):
+        want = expected_lines[index] if index < len(expected_lines) else None
+        got = actual_lines[index] if index < len(actual_lines) else None
+        if want == got:
+            continue
+        def show(value):
+            if value is None:
+                return "<no such line>"
+            text = value.decode("utf-8", "replace")
+            return repr(text if len(text) <= 160 else text[:160] + "...")
+        return (
+            f"line {index + 1} differs; reviewed={show(want)} built={show(got)} "
+            f"(reviewed {len(expected)} bytes, built {len(actual)} bytes)"
+        )
+    return f"no line differs but byte length does: reviewed {len(expected)}, built {len(actual)}"
+
+
 def _trusted_package_metadata(
     trusted_source_root: Path,
     expected_version: str,
@@ -1907,13 +1929,18 @@ def verify_release(
         wheel_metadata == sdist_metadata == sdist_egg_metadata
     ):
         _fail("cross-artifact package metadata files disagree")
-    if wheel_metadata != _trusted_package_metadata(
+    reviewed_metadata = _trusted_package_metadata(
         source_root,
         expected_version,
-    ):
+    )
+    if wheel_metadata != reviewed_metadata:
+        # Name the first divergence. Package metadata is public by definition, so quoting a
+        # line leaks nothing, and a bare "does not match" on a 15KB blob is unactionable --
+        # it cost a full CI round trip per guess to narrow down.
         _fail(
             "package metadata is not the reviewed metadata derived from "
-            "the trusted README.md"
+            "the trusted README.md: "
+            + _first_metadata_divergence(reviewed_metadata, wheel_metadata)
         )
     shared_runtime = sorted(
         f"Final/{name}" for name in _WHEEL_MODULES | _WHEEL_DATA
