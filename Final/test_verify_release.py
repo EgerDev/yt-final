@@ -18,6 +18,7 @@ from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 import pytest
 
 import scripts.verify_release as verifier
+import scripts.verify_release as _verify_release_module
 from scripts.verify_release import ReleaseVerificationError, verify_release
 
 
@@ -296,28 +297,19 @@ def _canonical_sdist_sources() -> bytes:
 
 
 def _canonical_package_metadata(version: str = VERSION) -> bytes:
-    description = (ROOT / "README.md").read_bytes()
-    assert b"\r" not in description
-    description = description.replace(b"\n", b"\r\n")
-    return (
-        b"Metadata-Version: 2.4\r\n"
-        b"Name: yt-final\r\n"
-        + f"Version: {version}\r\n".encode("ascii")
-        + b"License-Expression: Unlicense\r\n"
-        b"Requires-Python: >=3.11\r\n"
-        b"Description-Content-Type: text/markdown\r\n"
-        b"License-File: LICENSE\r\n"
-        b"Requires-Dist: packaging>=25.0\r\n"
-        b"Requires-Dist: regex>=2026.7.19\r\n"
-        b"Requires-Dist: yt-dlp>=2026.7.4\r\n"
-        b"Requires-Dist: yt-dlp-ejs>=0.8.0\r\n"
-        b"Requires-Dist: bgutil-ytdlp-pot-provider>=1.3.1\r\n"
-        b"Requires-Dist: requests>=2.32.2\r\n"
-        b"Requires-Dist: urllib3>=2.0.2\r\n"
-        b"Dynamic: license-file\r\n"
-        b"\r\n"
-        + description
-    )
+    """Delegate to the verifier's own expectation instead of restating it.
+
+    This used to be a second, hand-maintained copy of verify_release's METADATA literal. Two
+    copies of the same 30-line constant is how it silently drifted from pyproject.toml in the
+    first place, and the duplicate made the drift twice as expensive to notice: the release
+    verifier rejected every macOS build while these tests stayed green against the stale copy.
+
+    Deriving the fixture here is not circular. These tests exercise the verifier's BEHAVIOUR --
+    that it accepts a faithful artifact and rejects a tampered one -- and the independent check
+    that the expectation still matches what pyproject declares lives in
+    test_release_packaging.py::test_reviewed_package_metadata_still_matches_pyproject.
+    """
+    return _verify_release_module._trusted_package_metadata(ROOT, version)
 
 
 def _version_source(version: str) -> bytes:

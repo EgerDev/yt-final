@@ -535,7 +535,8 @@ def test_cdp_snapshot_copies_key_and_cookie_db_owner_only(tmp_path):
     destination.mkdir()
     _make_disposable_windows_source_private(source)
 
-    assert cdp._snapshot_profile(source, destination) is True
+    assert cdp._snapshot_profile(source, destination) is True, (
+        "snapshot refused; recorded reason: " + repr(cdp.last_snapshot_failure()))
 
     local_state = destination / "Local State"
     copied_cookies = destination / "Default" / "Network" / "Cookies"
@@ -1895,7 +1896,8 @@ def test_cdp_snapshot_reads_opened_source_after_parent_path_swap(
 
     monkeypatch.setattr(cdp._OpenedProfileFile, "read", swap_then_read)
 
-    assert cdp._snapshot_profile(source, destination) is True
+    assert cdp._snapshot_profile(source, destination) is True, (
+        "snapshot refused; recorded reason: " + repr(cdp.last_snapshot_failure()))
     assert (
         destination / "Default" / "Network" / "Cookies"
     ).read_bytes() == b"original-cookie"

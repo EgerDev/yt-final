@@ -6898,3 +6898,51 @@ def test_pyproject_does_not_mix_a_license_expression_with_a_license_classifier()
             "setuptools raises InvalidConfigError on that pair, which breaks `pip install .` "
             "and every CI cell. Drop the classifier -- the expression already carries the licence."
         )
+
+
+def test_reviewed_package_metadata_still_matches_pyproject():
+    """The reviewed METADATA expectation must track what pyproject actually declares.
+
+    scripts/verify_release.py hardcodes the exact METADATA bytes a release is allowed to
+    publish, deliberately: deriving it from the build would make the check tautological.
+    The cost of that choice is that it silently rots when pyproject gains a field.
+
+    It had rotted badly. The expectation named neither Summary, nor Keywords, nor any of the
+    four Project-URLs, nor any of the twelve Classifiers that pyproject declares -- so every
+    macOS cell failed the release verifier with "package metadata is not the reviewed
+    metadata derived from the trusted README.md". Nobody saw it because CI had not executed a
+    step in weeks.
+
+    This does not re-derive the expectation; it only asserts that every value pyproject
+    declares is present in it. A genuine review is still required to change the literal, but
+    forgetting to is now caught in milliseconds rather than by a release.
+    """
+    import tomllib
+
+    root = Path(__file__).resolve().parent.parent
+    sys.path.insert(0, str(root / "scripts"))
+    import verify_release
+
+    project = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    metadata = verify_release._trusted_package_metadata(root, "1.0.0")
+    header = metadata.split(b"\r\n\r\n", 1)[0].decode("utf-8")
+
+    missing = []
+    if project.get("description"):
+        if f"Summary: {project['description']}" not in header:
+            missing.append("Summary")
+    for classifier in project.get("classifiers") or []:
+        if f"Classifier: {classifier}" not in header:
+            missing.append(f"Classifier: {classifier}")
+    if project.get("keywords"):
+        if f"Keywords: {','.join(project['keywords'])}" not in header:
+            missing.append("Keywords")
+    for label, url in (project.get("urls") or {}).items():
+        if f"Project-URL: {label}, {url}" not in header:
+            missing.append(f"Project-URL: {label}")
+
+    assert not missing, (
+        "scripts/verify_release.py::_trusted_package_metadata has drifted from "
+        f"pyproject.toml and is missing: {missing}. A release built from this pyproject "
+        "would be rejected by the release verifier."
+    )

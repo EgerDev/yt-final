@@ -55,7 +55,16 @@ def _metadata_identity(metadata):
         metadata.st_nlink,
         metadata.st_size,
         metadata.st_mtime_ns,
-        metadata.st_ctime_ns,
+        # Creation time where the platform exposes it, NOT st_ctime. Python 3.14 changed
+        # Windows st_ctime from creation time to metadata-change time, which is mutable: the
+        # same file measured through os.stat and then os.fstat reported values ~2ms apart, so
+        # every sdist capture raised "source file identity changed before open". An identity
+        # tuple may only hold fields that cannot move under it. st_birthtime_ns is the stable
+        # replacement on 3.14+ and macOS; where it does not exist (Windows <=3.13, Linux)
+        # st_ctime_ns is left in place, since nothing in this flow mutates it there.
+        getattr(metadata, "st_birthtime_ns", None)
+        if hasattr(metadata, "st_birthtime_ns")
+        else metadata.st_ctime_ns,
         getattr(metadata, "st_file_attributes", None),
         getattr(metadata, "st_reparse_tag", None),
     )
