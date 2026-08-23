@@ -1,0 +1,59 @@
+# yt_final — Python dependencies
+#
+#   python -m pip install -r requirements.txt
+#
+# Requires Python 3.11+ (the config loader uses the stdlib `tomllib`).
+#
+# The running app never installs or activates Python packages in version 1.0.0.
+# This is non-certified compatibility/development floor metadata for an
+# operator-managed environment; `pip install -r` is not reproducible or
+# provenance-certified. A certified release workflow must use the separately
+# reviewed approved-python.lock with --require-hashes, then install the wheel
+# with --no-deps. That release lock is maintained outside this floor file.
+#
+# NOT pip-installable — install these separately:
+#   ffmpeg  Required for encode/remux and for merging video+audio.
+#           https://ffmpeg.org  (Windows x86_64 can use the managed Updates copy)
+#   node    Required to solve YouTube's "nsig" challenge. WITHOUT A JS RUNTIME
+#           EVERY DOWNLOAD IS THROTTLED TO ROUGHLY 1 MiB/s — this is the single
+#           most common cause of slow downloads.  https://nodejs.org
+
+# ---- required ---------------------------------------------------------------
+# PEP 440 parser used to validate these declared runtime floors locally.
+packaging>=25.0
+
+# Bounded, Unicode-aware watch title matching with a per-operation timeout.
+regex>=2026.7.19
+
+# The download engine. Update this OFTEN: YouTube ships breaking changes and an
+# old yt-dlp fails or silently falls back to a slow client.
+yt-dlp>=2026.7.4
+
+# ---- strongly recommended (this is the fast path) ---------------------------
+# Helps solve the nsig challenge (pairs with the node/deno runtime above).
+yt-dlp-ejs>=0.8.0
+# PO-token provider plugin — unlocks YouTube's unthrottled client path.
+# The running app never changes this provider; its in-app Python dependency
+# updater is disabled in 1.0.0.
+# The helper server is manual-only until an immutable server artifact is
+# certified; keep provider and server versions aligned.
+bgutil-ytdlp-pot-provider>=1.3.1
+
+# Connection pooling. These two carry no features of their own — when they import,
+# yt-dlp automatically prefers its POOLED RequestsRH transport. Without them every
+# 10 MiB chunk opens a NEW TCP connection, so the congestion window resets at each
+# chunk boundary and never fully opens on a fast link. Measured on an interleaved
+# A/B (n=12/arm, only the handler differing): 21.8 -> 36.6 MiB/s median, +67.6%.
+# The floors are HARD: yt-dlp raises ImportError below them and silently drops back
+# to the unpooled handler, so a too-old pin costs you the speedup with no error.
+requests>=2.32.2
+urllib3>=2.0.2
+
+# ---- optional ---------------------------------------------------------------
+# NOT required for the Auth tab: both "Login" and "Import from browser" run on the
+# built-in CDP client (_cdp_client.py) driving a real Chrome/Chromium, and never
+# touch Playwright. Kept only as an optional automation browser and installed
+# manually when needed. If you do want it:
+#     python -m pip install "playwright>=1.61.0"
+#     python -m playwright install chromium
+# playwright>=1.61.0

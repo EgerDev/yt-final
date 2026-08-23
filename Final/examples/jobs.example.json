@@ -1,0 +1,40 @@
+{
+  "_comment": "Run with:  python yt_final.py batch examples/jobs.example.json   (add --dry-run to preview, --queue to enqueue)",
+  "defaults": {
+    "quality": "1080p",
+    "codec": "h264",
+    "encode_mode": "copy",
+    "chapters": true,
+    "embed_metadata": true
+  },
+  "jobs": [
+    {
+      "urls": [
+        "https://www.youtube.com/watch?v=4YrzJ9RZ9qY"
+      ],
+      "section": "0:00-0:30",
+      "embed_thumbnail": true
+    },
+    {
+      "urls": [
+        "https://www.youtube.com/watch?v=4YrzJ9RZ9qY"
+      ],
+      "quality": "audio",
+      "audio_format": "flac",
+      "loudnorm": -14
+    },
+    {
+      "urls": [
+        "https://www.youtube.com/watch?v=4YrzJ9RZ9qY"
+      ],
+      "encode_mode": "reencode",
+      "profile": "prores_hq",
+      "audio_codec": "pcm_s24le",
+      "sub_langs": [
+        "en"
+      ],
+      "sub_mode": "embed"
+    }
+  ],
+  "_security": "An 'on_complete' key in a manifest runs a program when the job finishes. It is IGNORED unless you also pass the top-level --allow-hooks flag. Never run a manifest you did not write without reading it first: --dry-run lists any hook that would be honored."
+}

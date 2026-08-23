@@ -1,0 +1,114 @@
+[build-system]
+requires = ["setuptools==83.0.0", "wheel==0.47.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "yt-final"
+dynamic = ["version", "dependencies"]
+requires-python = ">=3.11"
+license = "Unlicense"
+license-files = ["LICENSE"]
+readme = "README.md"
+description = "Turn YouTube URLs into edit-ready media for Premiere, Resolve, and Avid: hardware-accelerated encoding, NLE marker export, durable queue, and a local web console."
+keywords = ["youtube", "yt-dlp", "ffmpeg", "video", "download", "nle", "premiere", "resolve", "avid", "prores", "dnxhr", "markers", "edl", "fcpxml"]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Environment :: Console",
+  "Environment :: Web Environment",
+  "Intended Audience :: End Users/Desktop",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: MacOS :: MacOS X",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Multimedia :: Video",
+  "Topic :: Multimedia :: Video :: Conversion",
+]
+
+[project.urls]
+Homepage = "https://github.com/EgerDev/yt-final"
+Source = "https://github.com/EgerDev/yt-final"
+Issues = "https://github.com/EgerDev/yt-final/issues"
+Changelog = "https://github.com/EgerDev/yt-final/blob/main/CHANGELOG.md"
+
+[project.scripts]
+yt-final = "Final.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["Final"]
+pythonpath = ["Final"]
+strict_config = true
+strict_markers = true
+addopts = "--tb=short"
+
+[tool.ruff]
+target-version = "py311"
+respect-gitignore = true
+exclude = [
+  ".artifacts",
+  ".git",
+  ".pytest_cache",
+  ".ruff_cache",
+  ".venv",
+  ".worktrees",
+  "__pycache__",
+  "archive",
+  "build",
+  "dist",
+  "downloads",
+  "test_out",
+  "test_outputs",
+  "*.egg-info",
+]
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82"]
+
+[tool.mypy]
+python_version = "3.11"
+files = [
+  "Final/websessions.py",
+  "Final/secureio.py",
+  "Final/redaction.py",
+  "Final/state_validation.py",
+  "Final/watch_filters.py",
+  "Final/url_identity.py",
+  "Final/notifications.py",
+  "Final/installer_lock.py",
+  "Final/tool_manifest.py",
+  "scripts/*.py",
+]
+check_untyped_defs = true
+warn_unused_ignores = true
+no_implicit_optional = true
+warn_unused_configs = true
+follow_imports = "silent"
+
+[tool.setuptools]
+packages = ["Final"]
+include-package-data = false
+
+[tool.setuptools.dynamic]
+version = { attr = "Final._version.__version__" }
+dependencies = { file = ["Final/requirements.txt"] }
+
+[tool.setuptools.package-data]
+Final = [
+  "requirements.txt",
+  "approved-python.lock",
+  "THIRD_PARTY_NOTICES",
+  "webui/*.html",
+  "webui/*.js",
+  "webui/*.css",
+  "assets/slate.ttf",
+]
+
+[tool.setuptools.exclude-package-data]
+Final = [
+  "INNOVATION_ROADMAP.md",
+  "README.md",
+  "Start yt_final.bat",
+  "Start yt_final.command",
+  "examples/*",
+]

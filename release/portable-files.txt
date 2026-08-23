@@ -1,0 +1,47 @@
+# Root release identity and product documentation.
+LICENSE
+README.md
+
+# Direct-script product files.
+Final/README.md
+Final/Start yt_final.bat
+Final/Start yt_final.command
+Final/THIRD_PARTY_NOTICES
+Final/__init__.py
+Final/__main__.py
+Final/_cdp_client.py
+Final/_version.py
+Final/approved-python.lock
+Final/assets/**
+Final/capability.py
+Final/cli.py
+Final/cookie_providers.py
+Final/cookies_auth.py
+Final/dependency_contract.py
+Final/desync_proxy.py
+Final/examples/**
+Final/executable_trust.py
+Final/ffmpeg_updater.py
+Final/installer_lock.py
+Final/jobspec.py
+Final/jobstore.py
+Final/managed_env.py
+Final/markers.py
+Final/nfo.py
+Final/notifications.py
+Final/optional_tools.py
+Final/redaction.py
+Final/requirements.txt
+Final/secureio.py
+Final/settings.py
+Final/speedtest.py
+Final/state_validation.py
+Final/tool_manifest.py
+Final/url_identity.py
+Final/watch.py
+Final/watch_filters.py
+Final/watchstore.py
+Final/webserver.py
+Final/websessions.py
+Final/webui/**
+Final/yt_final.py

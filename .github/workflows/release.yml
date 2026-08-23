@@ -1,0 +1,514 @@
+name: Protected Draft Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag (v1.0.0 only)
+        required: true
+        type: string
+      confirm_no_policy_bypass:
+        description: I verified environment admin bypass and tag-ruleset bypass actors are disabled
+        required: true
+        default: false
+        type: boolean
+      confirm_immutable_releases:
+        description: I verified repository release immutability is enabled
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: protected-draft-${{ github.repository }}-${{ inputs.tag }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  resolve:
+    name: Resolve the reviewed release identity
+    runs-on: windows-2025
+    timeout-minutes: 15
+    outputs:
+      default_branch: ${{ steps.resolve.outputs.default_branch }}
+      source_sha: ${{ steps.resolve.outputs.source_sha }}
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - name: Check out the dispatch default branch and all tags
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          clean: true
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Resolve the exact release identity
+        id: resolve
+        env:
+          CONFIRM_IMMUTABLE_RELEASES: ${{ inputs.confirm_immutable_releases }}
+          CONFIRM_NO_POLICY_BYPASS: ${{ inputs.confirm_no_policy_bypass }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          DISPATCH_REF: ${{ github.ref }}
+          DISPATCH_TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+
+          $tag = $env:DISPATCH_TAG
+          if ($tag -cne "v1.0.0") {
+            throw "the only accepted release tag is v1.0.0"
+          }
+          if ($env:CONFIRM_NO_POLICY_BYPASS -cne "true") {
+            throw (
+              "confirm that environment administrator bypass and tag " +
+              "ruleset bypass actors are disabled"
+            )
+          }
+          if ($env:CONFIRM_IMMUTABLE_RELEASES -cne "true") {
+            throw "confirm that repository release immutability is enabled"
+          }
+          $repository = $env:REPOSITORY
+          if ($repository -cnotmatch "^[^/]+/[^/]+$") {
+            throw "repository identity is unavailable"
+          }
+
+          function Get-GitHubJson {
+            param([Parameter(Mandatory = $true)][string] $Path)
+            $body = @(
+              gh api --method GET `
+                -H "Accept: application/vnd.github+json" `
+                -H "X-GitHub-Api-Version: 2026-03-10" `
+                $Path
+            )
+            if ($body.Count -eq 0) {
+              throw "GitHub policy endpoint returned no JSON: $Path"
+            }
+            return (($body -join "`n") | ConvertFrom-Json -Depth 100)
+          }
+
+          $environment = Get-GitHubJson `
+            "repos/$repository/environments/release"
+          if ($environment.name -cne "release") {
+            throw "the protected release environment is unavailable"
+          }
+          $reviewRules = @(
+            $environment.protection_rules |
+              Where-Object { $_.type -ceq "required_reviewers" }
+          )
+          if (
+            $reviewRules.Count -ne 1 -or
+            $reviewRules[0].prevent_self_review -ne $true -or
+            @($reviewRules[0].reviewers).Count -lt 1
+          ) {
+            throw (
+              "the release environment must require a reviewer and " +
+              "prevent self-review"
+            )
+          }
+
+          $targetRef = "refs/tags/$tag"
+          $tagIsProtected = $false
+          $rulesetSummaries = @(
+            Get-GitHubJson `
+              "repos/$repository/rulesets?includes_parents=true&per_page=100"
+          )
+          foreach ($summary in $rulesetSummaries) {
+            $ruleset = Get-GitHubJson (
+              "repos/$repository/rulesets/$($summary.id)" +
+              "?includes_parents=true"
+            )
+            $includes = @($ruleset.conditions.ref_name.include)
+            $excludes = @($ruleset.conditions.ref_name.exclude)
+            $ruleTypes = @($ruleset.rules | ForEach-Object { $_.type })
+            if (
+              $ruleset.enforcement -ceq "active" -and
+              $ruleset.target -ceq "tag" -and
+              $includes.Count -eq 1 -and
+              $includes -ccontains $targetRef -and
+              $excludes.Count -eq 0 -and
+              $ruleTypes -ccontains "update" -and
+              $ruleTypes -ccontains "deletion"
+            ) {
+              $tagIsProtected = $true
+              break
+            }
+          }
+          if (-not $tagIsProtected) {
+            throw (
+              "v1.0.0 requires an active exact tag ruleset that " +
+              "restricts updates and deletions"
+            )
+          }
+
+          $defaultBranch = $env:DEFAULT_BRANCH
+          if ([string]::IsNullOrWhiteSpace($defaultBranch)) {
+            throw "repository default branch is unavailable"
+          }
+          $expectedDispatchRef = "refs/heads/$defaultBranch"
+          if ($env:DISPATCH_REF -cne $expectedDispatchRef) {
+            throw "dispatch must use the repository default branch"
+          }
+
+          $sourceSha = (
+            git rev-parse --verify "refs/tags/$tag^{commit}"
+          ).Trim()
+          $defaultSha = (
+            git rev-parse --verify `
+              "refs/remotes/origin/$defaultBranch^{commit}"
+          ).Trim()
+          foreach ($sha in ($sourceSha, $defaultSha)) {
+            if ($sha -cnotmatch "^[0-9a-f]{40}$") {
+              throw "release identity did not resolve to a full commit SHA"
+            }
+          }
+
+          $PSNativeCommandUseErrorActionPreference = $false
+          git merge-base --is-ancestor $sourceSha $defaultSha
+          $ancestorExit = $LASTEXITCODE
+          $PSNativeCommandUseErrorActionPreference = $true
+          if ($ancestorExit -ne 0) {
+            throw "release tag commit is not contained by the default branch"
+          }
+
+          $versionSource = @(git show "${sourceSha}:Final/_version.py")
+          $versionMatches = [regex]::Matches(
+            ($versionSource -join "`n"),
+            '(?m)^__version__ = "([^"]+)"$'
+          )
+          if ($versionMatches.Count -ne 1) {
+            throw "tag commit has no unique canonical version declaration"
+          }
+          $version = $versionMatches[0].Groups[1].Value
+          if ($version -cne "1.0.0") {
+            throw "tag commit version is not the reviewed 1.0.0 release"
+          }
+          if ($tag -cne "v$version") {
+            throw "release tag does not match the source version"
+          }
+
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT `
+            -Value "default_branch=$defaultBranch" -Encoding utf8
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT `
+            -Value "source_sha=$sourceSha" -Encoding utf8
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT `
+            -Value "tag=$tag" -Encoding utf8
+
+  ci:
+    name: Re-run the complete release CI matrix
+    needs: resolve
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+    with:
+      source_sha: ${{ needs.resolve.outputs.source_sha }}
+
+  verify:
+    name: Verify the release artifact handoff
+    needs: [resolve, ci]
+    runs-on: windows-2025
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the resolved release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          clean: true
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+          ref: ${{ needs.resolve.outputs.source_sha }}
+
+      - name: Select release verification Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          architecture: x64
+          python-version: "3.11"
+
+      - name: Download the CI-audited release artifact set
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3
+        with:
+          name: yt-final-1.0.0-${{ needs.resolve.outputs.source_sha }}
+          path: ${{ runner.temp }}/release-artifacts
+
+      - name: Revalidate tag binding and downloaded artifacts
+        env:
+          ARTIFACT_DIR: ${{ runner.temp }}/release-artifacts
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          SOURCE_SHA: ${{ needs.resolve.outputs.source_sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+
+          $tag = $env:RELEASE_TAG
+          $sourceSha = $env:SOURCE_SHA
+          $currentTagSha = (
+            git rev-parse --verify "refs/tags/$tag^{commit}"
+          ).Trim()
+          $headSha = (git rev-parse --verify "HEAD^{commit}").Trim()
+          if ($currentTagSha -cne $sourceSha -or $headSha -cne $sourceSha) {
+            throw "release tag, audited source, and draft checkout disagree"
+          }
+
+          $sourceEpoch = (
+            git show --no-patch --format=%ct $sourceSha
+          ).Trim()
+          if ($sourceEpoch -cnotmatch "^[1-9][0-9]*$") {
+            throw "release commit timestamp is not a canonical epoch"
+          }
+
+          python -I -B scripts/verify_release.py `
+            $env:ARTIFACT_DIR `
+            --expected-version 1.0.0 `
+            --trusted-source-root $env:GITHUB_WORKSPACE `
+            --expected-source-epoch $sourceEpoch
+
+  draft:
+    name: Create the protected draft from the verified handoff
+    needs: [resolve, verify]
+    runs-on: windows-2025
+    timeout-minutes: 30
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - name: Download the verified release artifact handoff
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3
+        with:
+          name: yt-final-1.0.0-${{ needs.resolve.outputs.source_sha }}
+          path: ${{ runner.temp }}/release-artifacts
+
+      - name: Validate the immutable artifact handoff
+        env:
+          ARTIFACT_DIR: ${{ runner.temp }}/release-artifacts
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+
+          $artifactNames = @(
+            "yt_final-1.0.0-portable.zip"
+            "yt_final-1.0.0-py3-none-any.whl"
+            "yt_final-1.0.0.tar.gz"
+          )
+          $expectedNames = @("SHA256SUMS") + $artifactNames
+          if (
+            -not (
+              Test-Path -LiteralPath $env:ARTIFACT_DIR -PathType Container
+            )
+          ) {
+            throw "verified release artifact handoff is unavailable"
+          }
+          $items = @(
+            Get-ChildItem -LiteralPath $env:ARTIFACT_DIR -Force
+          )
+          if (
+            $items.Count -ne $expectedNames.Count -or
+            @($items | Where-Object {
+              $_.PSIsContainer -or
+              ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+              $expectedNames -cnotcontains $_.Name
+            }).Count -ne 0
+          ) {
+            throw "verified artifact handoff does not match the exact allowlist"
+          }
+          foreach ($name in $expectedNames) {
+            $path = Join-Path $env:ARTIFACT_DIR $name
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "verified release artifact disappeared: $path"
+            }
+          }
+
+          $manifestPath = Join-Path $env:ARTIFACT_DIR "SHA256SUMS"
+          $manifestBytes = [IO.File]::ReadAllBytes($manifestPath)
+          if ($manifestBytes.Length -gt 4096) {
+            throw "SHA256SUMS exceeds the reviewed size limit"
+          }
+          $utf8 = [Text.UTF8Encoding]::new($false, $true)
+          try {
+            $actualManifest = $utf8.GetString($manifestBytes)
+          } catch {
+            throw "SHA256SUMS is not canonical UTF-8"
+          }
+          $expectedRows = @(
+            foreach ($name in $artifactNames) {
+              $path = Join-Path $env:ARTIFACT_DIR $name
+              $digest = (
+                Get-FileHash -Algorithm SHA256 -LiteralPath $path
+              ).Hash.ToLowerInvariant()
+              "$digest  $name"
+            }
+          )
+          $expectedManifest = ($expectedRows -join "`n") + "`n"
+          if ($actualManifest -cne $expectedManifest) {
+            throw "SHA256SUMS disagrees with the immutable artifact handoff"
+          }
+
+      - name: Create the protected draft GitHub Release
+        env:
+          ARTIFACT_DIR: ${{ runner.temp }}/release-artifacts
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          REPOSITORY: ${{ github.repository }}
+          SOURCE_SHA: ${{ needs.resolve.outputs.source_sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+
+          $assetNames = @(
+            "SHA256SUMS"
+            "yt_final-1.0.0-portable.zip"
+            "yt_final-1.0.0-py3-none-any.whl"
+            "yt_final-1.0.0.tar.gz"
+          )
+          $assets = @(
+            $assetNames | ForEach-Object {
+              [pscustomobject]@{
+                Name = $_
+                Path = Join-Path $env:ARTIFACT_DIR $_
+              }
+            }
+          )
+          foreach ($asset in $assets) {
+            if (-not (Test-Path -LiteralPath $asset.Path -PathType Leaf)) {
+              throw "verified release asset disappeared: $($asset.Path)"
+            }
+          }
+
+          $repository = $env:REPOSITORY
+          $sourceSha = $env:SOURCE_SHA
+          $tag = $env:RELEASE_TAG
+          $releaseTitle = "yt_final 1.0.0"
+          $releaseBody = @(
+            "Protected reviewer draft for yt_final 1.0.0."
+            ""
+            "Audited commit: $sourceSha"
+          ) -join "`n"
+
+          function Assert-RemoteTagBinding {
+            $resolved = @(
+              gh api --method GET `
+                -H "Accept: application/vnd.github+json" `
+                -H "X-GitHub-Api-Version: 2026-03-10" `
+                "repos/$repository/commits/$tag" `
+                --jq ".sha"
+            )
+            if (
+              $resolved.Count -ne 1 -or
+              $resolved[0].Trim() -cne $sourceSha
+            ) {
+              throw "remote release tag no longer resolves to the audited commit"
+            }
+          }
+
+          function Get-ReleaseJson {
+            $body = @(
+              gh api --method GET `
+                -H "Accept: application/vnd.github+json" `
+                -H "X-GitHub-Api-Version: 2026-03-10" `
+                "repos/$repository/releases/tags/$tag"
+            )
+            return (($body -join "`n") | ConvertFrom-Json -Depth 100)
+          }
+
+          function Assert-ReleaseMetadata {
+            param([Parameter(Mandatory = $true)] $Release)
+            if (
+              $Release.draft -ne $true -or
+              $Release.prerelease -ne $false -or
+              $Release.tag_name -cne $tag -or
+              $Release.target_commitish -cne $sourceSha -or
+              $Release.name -cne $releaseTitle -or
+              $Release.body -cne $releaseBody
+            ) {
+              throw "draft is not the workflow-owned release candidate"
+            }
+          }
+
+          Assert-RemoteTagBinding
+          $PSNativeCommandUseErrorActionPreference = $false
+          $existingSummaryJson = @(
+            gh release view $tag `
+              --repo $repository `
+              --json isDraft,tagName
+          )
+          $viewExit = $LASTEXITCODE
+          $PSNativeCommandUseErrorActionPreference = $true
+
+          if ($viewExit -eq 0) {
+            $summary = (
+              ($existingSummaryJson -join "`n") |
+                ConvertFrom-Json -Depth 10
+            )
+            if (
+              $summary.isDraft -ne $true -or
+              $summary.tagName -cne $tag
+            ) {
+              throw "the tag already has a non-draft or mismatched release"
+            }
+          } else {
+            gh release create --draft --verify-tag `
+              --repo $repository `
+              --target $sourceSha `
+              --title $releaseTitle `
+              --notes $releaseBody `
+              $tag
+          }
+
+          Assert-RemoteTagBinding
+          $release = Get-ReleaseJson
+          Assert-ReleaseMetadata $release
+          $expectedNames = @($assets | ForEach-Object { $_.Name })
+          $unexpectedNames = @(
+            $release.assets |
+              ForEach-Object { $_.name } |
+              Where-Object { $expectedNames -cnotcontains $_ }
+          )
+          if ($unexpectedNames.Count -ne 0) {
+            throw "draft contains unexpected assets: $unexpectedNames"
+          }
+
+          $assetPaths = @($assets | ForEach-Object { $_.Path })
+          gh release upload $tag @assetPaths --clobber --repo $repository
+
+          Assert-RemoteTagBinding
+          $release = Get-ReleaseJson
+          Assert-ReleaseMetadata $release
+          $remoteAssets = @{}
+          foreach ($remote in $release.assets) {
+            if ($remoteAssets.ContainsKey($remote.name)) {
+              throw "draft contains duplicate asset names"
+            }
+            $remoteAssets[$remote.name] = $remote
+          }
+          if (
+            $remoteAssets.Count -ne $assets.Count -or
+            @($remoteAssets.Keys | Where-Object {
+              $expectedNames -cnotcontains $_
+            }).Count -ne 0
+          ) {
+            throw "draft asset names do not match the reviewed allowlist"
+          }
+          foreach ($asset in $assets) {
+            $remote = $remoteAssets[$asset.Name]
+            $local = Get-Item -LiteralPath $asset.Path
+            $digest = (
+              Get-FileHash -Algorithm SHA256 -LiteralPath $asset.Path
+            ).Hash.ToLowerInvariant()
+            if (
+              $null -eq $remote -or
+              $remote.state -cne "uploaded" -or
+              [int64]$remote.size -ne $local.Length -or
+              $remote.digest -cne "sha256:$digest"
+            ) {
+              throw "draft asset failed size/digest reconciliation: $($asset.Name)"
+            }
+          }

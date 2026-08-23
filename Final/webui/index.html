@@ -1,0 +1,1204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The console is deliberately dark; without this, UA-drawn widgets (select popups, scrollbars,
+     form controls) render in the light scheme and look pasted on. -->
+<meta name="color-scheme" content="dark">
+<title>yt_final · ingest console</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="is-locked">
+<div class="grain" aria-hidden="true"></div>
+<div class="ambient" aria-hidden="true"></div>
+
+<!-- Password gate — shown before the app (simple login, no token URLs) -->
+<div id="login-gate" class="login-gate" role="dialog" aria-labelledby="login-title" aria-modal="true">
+  <form id="login-form" class="login-card" autocomplete="on">
+    <div class="login-brand">
+      <span class="login-led" aria-hidden="true"></span>
+      <div class="login-brand-txt">
+        <h1 id="login-title">YT_FINAL</h1>
+        <p class="login-sub">local ingest console</p>
+      </div>
+    </div>
+    <label class="field login-field">
+      <span>Password</span>
+      <input id="login-password" type="password" name="password" autocomplete="current-password"
+             placeholder="Console password" required autofocus>
+    </label>
+    <button type="submit" class="run login-submit" id="login-submit">Unlock console</button>
+    <p class="hint login-hint" id="login-msg" role="status" aria-live="polite"></p>
+    <p class="login-foot">local application · session stored in this browser</p>
+    <p class="login-foot login-where">The password is printed by the launcher when the server
+       starts, and saved to <code>~/.yt_final/webui.txt</code> on the machine running it.</p>
+  </form>
+</div>
+
+<div id="app-root" class="app-root" hidden>
+<header class="rack">
+  <div class="shell rack-inner">
+    <div class="rack-id">
+      <span class="led" id="led" title="queue status"></span>
+      <div class="brand">
+        <h1>YT_FINAL</h1>
+        <p class="sub">youtube → NLE ingest engine</p>
+      </div>
+    </div>
+    <nav class="app-nav" role="tablist" aria-label="Console sections">
+      <button type="button" class="nav-tab is-active" role="tab" aria-selected="true" aria-controls="view-workspace" tabindex="0" data-view="workspace" id="nav-workspace">Workspace</button>
+      <button type="button" class="nav-tab" role="tab" aria-selected="false" aria-controls="view-watch" tabindex="-1" data-view="watch" id="nav-watch">Watch</button>
+      <button type="button" class="nav-tab" role="tab" aria-selected="false" aria-controls="view-auth" tabindex="-1" data-view="auth" id="nav-auth">Auth</button>
+      <button type="button" class="nav-tab" role="tab" aria-selected="false" aria-controls="view-speedtest" tabindex="-1" data-view="speedtest" id="nav-speedtest">Speed test</button>
+      <button type="button" class="nav-tab" role="tab" aria-selected="false" aria-controls="view-updates" tabindex="-1" data-view="updates" id="nav-updates">Updates</button>
+      <button type="button" class="nav-tab" role="tab" aria-selected="false" aria-controls="view-guide" tabindex="-1" data-view="guide" id="nav-guide">Field guide</button>
+    </nav>
+    <div class="rack-meta">
+      <div class="gauge gauge-host" id="host_os_gauge" title="Server host operating system (from /api/health)">
+        <span class="g-label">host os</span>
+        <span class="g-val" id="host_os_badge">…</span>
+      </div>
+      <div class="gauge gauge-queue" title="Jobs waiting or running right now">
+        <span class="g-label">queue</span>
+        <span class="g-val" id="qcount">0</span>
+      </div>
+      <div class="gauge gauge-clock" title="Local time">
+        <span class="g-label">local</span>
+        <span class="g-val" id="clock">—</span>
+      </div>
+    </div>
+    <!-- Lost-contact notice at SHELL level, deliberately outside every .view. The pipeline's own
+         #pipe_banner lives inside #view-workspace, which is hidden on the other five views — so a
+         server that died while the user was on Watch, Auth, Speed test, Updates or the Guide showed
+         nothing at all. #pipe_banner stays where it is; three call sites depend on it. -->
+    <p class="conn-banner" id="conn_banner" role="status" hidden></p>
+  </div>
+</header>
+
+<main class="shell">
+  <!-- ========== WORKSPACE: Compose + Pipeline (primary) ========== -->
+  <div class="view view-workspace is-active" id="view-workspace" role="tabpanel" aria-labelledby="nav-workspace">
+    <div class="workspace-grid">
+      <!-- COMPOSE -->
+      <section class="panel compose" id="compose">
+        <div class="panel-hd">
+          <span class="tick">01</span>
+          <h2>Compose job</h2>
+          <span class="panel-note">queue a download</span>
+        </div>
+
+        <!-- Happy path: URL → quality → delivery → save. Everything else is layered below. -->
+        <div class="compose-group compose-hero">
+          <label class="field field-url">
+            <span>YouTube URL(s) — one per line</span>
+            <textarea id="urls" rows="2" spellcheck="false" placeholder="https://youtu.be/…"></textarea>
+          </label>
+          <div class="hero-grid">
+            <label class="field"><span>Max resolution</span>
+              <select id="quality" title="How tall the video can be">
+                <option>1080p</option><option>best</option><option>4k</option>
+                <option>1440p</option><option>720p</option><option>480p</option><option>audio</option>
+              </select>
+            </label>
+            <label class="field"><span>Preferred stream</span>
+              <select id="codec" title="YouTube source codec family (not re-encode codec)">
+                <option value="h264">H.264 — edit-ready</option>
+                <option value="av1">AV1 — smaller / archive</option>
+                <option value="vp9">VP9 — common 4K</option>
+                <option value="any">Any — largest available</option>
+              </select>
+            </label>
+            <label class="field"><span>Delivery</span>
+              <select id="encode_mode">
+                <option value="copy">Remux — keep original (fast)</option>
+                <option value="reencode">Re-encode — editor profile</option>
+                <option value="none">Download only — no processing</option>
+              </select>
+            </label>
+          </div>
+          <label class="field" id="profile_wrap" hidden>
+            <span>Encoder profile</span>
+            <select id="profile"></select>
+            <span class="field-help muted">Only used when re-encoding</span>
+          </label>
+          <div class="preset-row" title="Save the settings above as a named preset, then reuse them in one click">
+            <select id="preset_select" aria-label="Apply a saved preset"></select>
+            <button type="button" id="preset_save" class="browse">＋ Save preset</button>
+            <!-- aria-label because name-from-content wins over title: without it the accessible name
+                 is the glyph, and a screen reader announces "✕ button". -->
+            <button type="button" id="preset_del" class="browse" aria-label="Delete the selected preset" title="Delete the selected preset">✕</button>
+          </div>
+          <div class="probe-row">
+            <button type="button" id="probe_res" class="browse probe-btn" title="Ask YouTube which resolutions this video has (no download, changes nothing)">Check available formats</button>
+            <p class="probe-result" id="probe_result" aria-live="polite"></p>
+          </div>
+          <!-- Organized probe pop-out (filled by app.js after /api/probe) -->
+          <div class="probe-pop" id="probe_pop" hidden role="dialog" aria-labelledby="probe_pop_title" aria-modal="false">
+            <div class="probe-pop-hd">
+              <div class="probe-pop-hd-txt">
+                <p class="probe-pop-kicker">Format probe</p>
+                <h3 id="probe_pop_title" class="probe-pop-title">—</h3>
+                <p class="probe-pop-meta" id="probe_pop_meta"></p>
+              </div>
+              <button type="button" class="ghost probe-pop-close" id="probe_pop_close" title="Close">Close</button>
+            </div>
+            <div class="probe-existing" id="probe_pop_existing" hidden>
+              <span class="probe-existing-txt" id="probe_pop_existing_txt"></span>
+              <button type="button" class="ghost" id="probe_pop_reveal" hidden>Show in folder</button>
+            </div>
+            <div class="probe-pop-body">
+              <div class="probe-stat-row">
+                <div class="probe-stat">
+                  <span class="probe-stat-k">Tallest stream</span>
+                  <span class="probe-stat-v" id="probe_pop_max">—</span>
+                </div>
+                <div class="probe-stat">
+                  <span class="probe-stat-k">Edit + speed</span>
+                  <span class="probe-stat-v acc" id="probe_pop_suggested">—</span>
+                </div>
+                <div class="probe-stat" title="Highest height YouTube offers as H.264 (usually ≤1080p)">
+                  <span class="probe-stat-k">H.264 ceiling</span>
+                  <span class="probe-stat-v" id="probe_pop_h264">—</span>
+                </div>
+                <div class="probe-stat">
+                  <span class="probe-stat-k">Frame rate</span>
+                  <span class="probe-stat-v" id="probe_pop_fps">—</span>
+                </div>
+              </div>
+              <div class="probe-block">
+                <p class="probe-block-hd">Available heights <span class="muted">click to set Max resolution</span></p>
+                <div class="probe-chips" id="probe_pop_heights" role="list"></div>
+              </div>
+              <div class="probe-block">
+                <p class="probe-block-hd">Video codecs <span class="muted">click to set Preferred stream</span></p>
+                <div class="probe-chips" id="probe_pop_codecs" role="list"></div>
+              </div>
+              <p class="probe-tip" id="probe_pop_tip" hidden></p>
+              <div class="probe-actions">
+                <button type="button" class="browse probe-act primary" id="probe_apply_suggested" title="1080p H.264 when available — best everyday edit + faster download">Apply edit + speed</button>
+                <button type="button" class="browse probe-act" id="probe_apply_max" title="Tallest stream (often 4K AV1/VP9) — bigger, slower, archive quality">Use tallest stream</button>
+                <button type="button" class="ghost probe-act" id="probe_open_url" hidden>Open on YouTube</button>
+              </div>
+            </div>
+          </div>
+          <label class="field field-save"><span>Save to folder</span>
+            <div class="path-row">
+              <input id="output_dir" spellcheck="false" placeholder="./downloads">
+              <button type="button" id="browse" class="browse">📁 Browse…</button>
+            </div>
+          </label>
+        </div>
+
+        <p class="compose-summary" id="compose_summary" aria-live="polite"></p>
+        <!-- Louder than the summary: this fires when the job will NOT do what the form says (today:
+             H.264 cannot reach the requested height, so 4k silently delivers 1080p). -->
+        <p class="compose-warn" id="compose_warn" role="status" hidden></p>
+        <button class="run" id="submit"><span class="run-ico">▶</span> Queue job</button>
+        <!-- role="status": #hint is the ONLY feedback channel for submit validation, queue
+             confirmations and every pipeline action, so it must be announced like its siblings
+             (#compose_summary / #probe_result / #clip_status). -->
+        <p class="hint" id="hint" role="status"></p>
+
+        <button class="adv-toggle" id="advToggle" type="button" aria-expanded="false" aria-controls="adv">▸ Advanced · cookies · clip · channels · audio · editors · speed</button>
+        <div class="adv" id="adv" hidden>
+          <details class="adv-section" id="adv_access">
+            <summary class="adv-label">Access <span class="adv-hint-inline" id="access_summary_hint">fix sign-in / throttle</span></summary>
+            <div class="adv-body">
+              <!-- Per-job cookie mode: Yes = Auth session, No = anonymous (unless override file). -->
+              <div class="access-mode" role="group" aria-labelledby="access_mode_label">
+                <p class="access-mode-label" id="access_mode_label">Use cookies for this job?</p>
+                <div class="access-mode-row">
+                  <label class="access-mode-opt">
+                    <input type="radio" name="use_auth" id="use_auth_yes" value="1" checked>
+                    <span class="access-mode-card">
+                      <strong>Yes</strong>
+                      <em>Auth session</em>
+                    </span>
+                  </label>
+                  <label class="access-mode-opt">
+                    <input type="radio" name="use_auth" id="use_auth_no" value="0">
+                    <span class="access-mode-card">
+                      <strong>No</strong>
+                      <em>Anonymous</em>
+                    </span>
+                  </label>
+                </div>
+                <p class="field-help muted access-mode-help" id="access_mode_help">
+                  <strong>Yes</strong> uses signed-in cookies from the Auth tab (fixes bot checks / throttle).
+                  <strong>No</strong> downloads without Auth — only an optional cookies.txt override below applies.
+                </p>
+              </div>
+
+              <div class="access-auth" id="access_auth" data-state="unknown">
+                <div class="access-auth-main">
+                  <span class="access-auth-dot" aria-hidden="true"></span>
+                  <div class="access-auth-txt">
+                    <p class="access-auth-lead" id="access_auth_lead">Checking Auth session…</p>
+                    <p class="access-auth-sub" id="access_auth_sub">Jobs can use the Auth tab session when Yes is selected.</p>
+                  </div>
+                </div>
+                <button type="button" class="ghost access-auth-btn" id="access_open_auth" title="Open Auth tab">Open Auth</button>
+              </div>
+              <details class="access-override" id="access_override">
+                <summary>Override for this job only <span class="muted">optional · cookies.txt</span></summary>
+                <div class="access-override-body" id="access_override_fields">
+                  <div class="cookiefile-block">
+                    <!-- <label for>, not a bare <span>: the visible text was not programmatically
+                         associated, so the field announced as an unlabelled edit box. -->
+                    <label class="cookiefile-label" for="cookiefile">Cookies file</label>
+                    <input id="cookiefile" class="cookiefile-path" spellcheck="false" placeholder="No file — use Yes/No above" readonly>
+                    <div class="cookiefile-actions">
+                      <button type="button" id="cookiefile_browse" class="browse cookiefile-btn" title="Pick a cookies.txt on the machine running the app">Browse…</button>
+                      <!-- A real <button>, not a <label for>: a label is not focusable and the file
+                           input is hidden (out of the tab order), so this control was reachable by
+                           MOUSE ONLY — keyboard users could not upload a cookies.txt at all. The
+                           button forwards to the input's own picker, so the existing change handler
+                           in app.js is untouched. -->
+                      <button type="button" class="browse cookiefile-btn cookiefile-upload-label" id="cookiefile_upload_btn" title="Upload a cookies.txt export">Upload…</button>
+                      <input type="file" id="cookiefile_upload" accept=".txt,text/plain" hidden>
+                      <button type="button" id="cookiefile_clear" class="ghost cookiefile-clear" title="Clear override" hidden>Clear</button>
+                    </div>
+                    <p class="field-help muted cookiefile-help" id="access_help">
+                      Optional path for one job. Overrides Auth when set. Clear to go back to Yes/No above.
+                    </p>
+                  </div>
+                </div>
+              </details>
+            </div>
+          </details>
+
+          <details class="adv-section" id="adv_clip">
+            <summary class="adv-label">Clip range <span class="adv-hint-inline" id="clip_summary_hint">optional · short clips only</span></summary>
+            <div class="adv-body">
+              <div class="clip-block">
+                <div class="clip-grid">
+                  <label class="field field-tight"><span>Start</span>
+                    <input id="section_start" spellcheck="false" placeholder="0:00" inputmode="text" autocomplete="off"
+                           title="MM:SS or seconds — leave both empty for full video">
+                  </label>
+                  <span class="clip-sep" aria-hidden="true">→</span>
+                  <label class="field field-tight"><span>End</span>
+                    <input id="section_end" spellcheck="false" placeholder="3:00" inputmode="text" autocomplete="off"
+                           title="MM:SS or seconds — must be after Start">
+                  </label>
+                </div>
+                <!-- Canonical START-END string for JobSpec (synced from Start/End) -->
+                <input type="hidden" id="section" value="">
+                <div class="clip-row-extra">
+                  <label class="chk clip-precise">
+                    <input type="checkbox" id="section_precise">
+                    <span>Precise cut (slower · frame-accurate)</span>
+                  </label>
+                  <p class="clip-status" id="clip_status" aria-live="polite"></p>
+                </div>
+                <p class="field-help muted" id="clip_help">
+                  Short clips only. Empty = full video. Examples: <code>1:30</code> → <code>3:00</code>, or seconds <code>90</code> → <code>180</code>. Clips are slower per MiB than full downloads.
+                </p>
+              </div>
+            </div>
+          </details>
+
+          <details class="adv-section" id="adv_batch">
+            <summary class="adv-label">Channels &amp; playlists <span class="adv-hint-inline" id="batch_summary_hint">archive · folder layout</span></summary>
+            <div class="adv-body">
+              <label class="chk"><input type="checkbox" id="download_archive_on"><span>Skip videos already downloaded (archive file)</span></label>
+              <label class="field"><span>Archive file</span>
+                <div class="path-row">
+                  <input id="download_archive" spellcheck="false" autocomplete="off"
+                         placeholder="blank = yt-final-archive.txt in “Save to folder”"
+                         title="Plain text list of video ids already pulled. Leave blank to keep it inside Save to folder; Browse… reuses an archive you already have.">
+                  <button type="button" id="download_archive_browse" class="browse">📄 Browse…</button>
+                </div>
+              </label>
+              <!-- Painted by syncArchiveNote(): an archive can be ON yet do NOTHING (clip job) or be
+                   unresolvable ($VAR folder), and a silently inert archive is exactly what makes a
+                   repeat channel pull re-download the whole channel. Empty here on purpose so the
+                   wording lives in one place (the pure planner), not two. -->
+              <p class="archive-note is-idle" id="archive_note" aria-live="polite"></p>
+              <label class="field"><span>Folder layout</span>
+                <select id="organize_by" title="Put each file in a subfolder">
+                  <option value="">Don’t organize</option>
+                  <option value="uploader">By channel name</option>
+                  <option value="date">By upload date</option>
+                </select>
+              </label>
+              <p class="field-help muted">Re-pulling a channel or playlist skips whatever the archive already lists, so only new uploads download. Keep the file and the next run is fast. Clip jobs never touch it.</p>
+            </div>
+          </details>
+
+          <details class="adv-section" id="adv_audio">
+            <summary class="adv-label">Audio &amp; subtitles <span class="adv-hint-inline">sound · captions · sponsors</span></summary>
+            <div class="adv-body adv-body-clusters">
+              <div class="adv-cluster">
+                <p class="adv-cluster-hd">Audio</p>
+                <div class="adv-grid">
+                  <label class="field field-tight"><span>Codec</span>
+                    <select id="audio_codec" title="How audio is stored when delivering video">
+                      <option value="">Profile default</option>
+                      <option value="copy">copy</option>
+                      <option value="aac">aac</option>
+                      <option value="pcm_s24le">pcm_s24le</option>
+                      <option value="flac">flac</option>
+                      <option value="libopus">libopus</option>
+                    </select>
+                  </label>
+                  <label class="field field-tight"><span>Loudness (LUFS)</span>
+                    <input id="loudnorm" type="number" step="0.5" placeholder="-14 · blank = skip" title="Optional loudness target. -14 streaming, -16 podcast, -23 broadcast">
+                  </label>
+                  <label class="field field-tight"><span>SponsorBlock</span>
+                    <select id="sponsorblock">
+                      <option value="">Off</option>
+                      <option value="mark">Mark chapters</option>
+                      <option value="remove">Cut segments</option>
+                    </select>
+                  </label>
+                  <label class="field field-tight"><span>File format</span>
+                    <select id="audio_format" title="Only when Max resolution = audio">
+                      <option value="">— video job</option>
+                      <option value="best">best</option>
+                      <option value="flac">flac</option>
+                      <option value="wav">wav</option>
+                      <option value="opus">opus</option>
+                      <option value="mp3">mp3</option>
+                      <option value="m4a">m4a</option>
+                    </select>
+                  </label>
+                  <label class="field field-tight"><span>Rip bitrate</span>
+                    <!-- Every value is > 10 on purpose. yt-dlp treats <= 10 as a VBR quality and
+                         silently emits NOTHING for libopus/flac/wav/alac, so a free-text box would
+                         ship that trap; a fixed kbps list always takes the '-b:a Nk' branch. -->
+                    <select id="audio_quality" title="Bitrate for an audio-only rip. Used by mp3, m4a and opus; flac, wav and best ignore it.">
+                      <option value="">Default (192 kbps)</option>
+                      <option value="320">320 kbps</option>
+                      <option value="256">256 kbps</option>
+                      <option value="192">192 kbps</option>
+                      <option value="128">128 kbps</option>
+                    </select>
+                  </label>
+                </div>
+                <!-- Painted by syncAudioNote(). Empty on purpose: the wording lives in the pure
+                     planner (ripBitrateNote), because the rip bitrate has three states in which the
+                     engine ignores it outright. -->
+                <p class="audio-note is-idle" id="audio_note" aria-live="polite"></p>
+                <p class="field-help muted adv-cluster-note">File format and Rip bitrate apply when Max resolution is <em>audio</em>. Codec is for video jobs.</p>
+              </div>
+              <div class="adv-cluster">
+                <p class="adv-cluster-hd">Subtitles</p>
+                <div class="adv-grid">
+                  <label class="field field-tight"><span>Languages</span>
+                    <input id="sub_langs" placeholder="en, es" spellcheck="false" title="Comma-separated language codes">
+                  </label>
+                  <label class="field field-tight"><span>Format</span>
+                    <select id="sub_format">
+                      <option value="srt">srt</option>
+                      <option value="vtt">vtt</option>
+                      <option value="both">both</option>
+                    </select>
+                  </label>
+                  <label class="field field-tight adv-grid-span"><span>Attach as</span>
+                    <select id="sub_mode">
+                      <option value="">Sidecar file (.srt next to video)</option>
+                      <option value="embed">Embed soft track</option>
+                      <option value="burn">Burn-in (forces re-encode)</option>
+                    </select>
+                  </label>
+                </div>
+                <label class="chk"><input type="checkbox" id="sub_auto" checked><span>include auto-generated (ASR) captions</span></label>
+                <p class="field-help muted adv-cluster-note">Leave languages empty for no subtitles. Most YouTube videos
+                  have only auto-generated captions, so leave the box above ticked or you will often get no file.</p>
+              </div>
+            </div>
+          </details>
+
+          <details class="adv-section">
+            <summary class="adv-label">For editors <span class="adv-hint-inline">NLE · markers · sidecars</span></summary>
+            <div class="adv-body">
+              <label class="field"><span>Timeline markers (chapters → editor)</span>
+                <select id="export_markers"><option value="">off</option><option value="edl">EDL · DaVinci Resolve</option><option value="csv">CSV · Premiere</option><option value="fcpxml">FCPXML · Final Cut</option><option value="all">all three</option></select>
+              </label>
+              <div class="checks">
+                <label class="chk"><input type="checkbox" id="chapters" checked><span>chapters</span></label>
+                <label class="chk"><input type="checkbox" id="embed_metadata" checked><span>metadata tags</span></label>
+                <label class="chk"><input type="checkbox" id="embed_thumbnail"><span>thumbnail</span></label>
+                <label class="chk"><input type="checkbox" id="write_sidecar"><span>info.json</span></label>
+                <label class="chk"><input type="checkbox" id="write_sidecar_text"><span>description+vtt sidecars</span></label>
+                <label class="chk"><input type="checkbox" id="write_nfo"><span>.nfo (Plex/Jellyfin)</span></label>
+                <label class="chk"><input type="checkbox" id="proxy_pair"><span>create editing proxy</span></label>
+                <label class="chk"><input type="checkbox" id="preserve_hdr" checked><span>keep HDR metadata (re-encode)</span></label>
+                <label class="chk"><input type="checkbox" id="no_shorts"><span>skip YouTube Shorts</span></label>
+                <label class="chk"><input type="checkbox" id="verify_strict"><span>fail the job if the finished file looks wrong</span></label>
+              </div>
+              <p class="field-help muted">Off by default. On, the delivered file is ffprobed and the job <strong>fails</strong> when it is under 1 KiB, has no audio stream, has no video stream (unless Max resolution is <code>audio</code>), or its duration is off by more than 1% of the video length (2 s floor, skipped for clips). It also fails when ffprobe is missing or errors &mdash; strict verification cannot pass a file it could not read. With it off the same mismatch is only a log warning. <strong>Delivery = &ldquo;Download only&rdquo; skips the check entirely</strong>: nothing is verified, not even a warning, because the post-processing stage that runs it never runs. The Will&hellip; line says so as &ldquo;skips verification&rdquo;.</p>
+            </div>
+          </details>
+
+          <details class="adv-section">
+            <summary class="adv-label">Performance <span class="adv-hint-inline">engine · GPU · parallel</span></summary>
+            <div class="adv-body">
+              <!-- Compact auto-detected hardware (for re-encode); kept out of the main compose flow -->
+              <div class="machine-status" id="machine_status" aria-live="polite">
+                <span class="machine-k">GPU</span>
+                <span class="machine-v" id="gpu" title="Detected graphics adapter">probing…</span>
+                <span class="machine-sep" aria-hidden="true">·</span>
+                <span class="machine-k">Encoders</span>
+                <span class="machine-v" id="encoders" title="Working hardware encode codecs">—</span>
+                <span class="machine-sep" aria-hidden="true">·</span>
+                <span class="machine-k">Transport</span>
+                <span class="machine-v" id="transport" title="HTTP transport: pooled (persistent connections, full speed) vs unpooled urllib (~+33–67% slower)">—</span>
+                <span class="machine-tag">auto</span>
+              </div>
+              <p class="field-help muted machine-status-note">Hardware re-encode only. Remux/copy ignores this. Missing encoders fall back automatically.</p>
+              <label class="field">
+                <span>Download engine</span>
+                <select id="download_engine" title="How media bytes are fetched after formats are chosen.">
+                  <option value="auto" selected>Auto (default) — built-in yt-dlp −N</option>
+                  <option value="builtin">Built-in (yt-dlp −N parallel fragments)</option>
+                  <option value="hybrid">Hybrid — smart pick (builtin / turbo / aria2)</option>
+                  <option value="aria2">aria2 only (progressive HTTP; needs aria2c)</option>
+                  <option value="turbo">Turbo only (N_m3u8DL-RE; single playlist)</option>
+                </select>
+              </label>
+              <p class="field-help muted"><strong>Auto / Built-in</strong> = normal YouTube path. <strong>Hybrid</strong> (optional) inspects the format then may use turbo or aria2 when they fit. Force aria2/turbo pin one tool and fall back if missing/unsuitable.</p>
+              <div class="checks">
+                <label class="chk"><input type="checkbox" id="parallel"><span>download URLs in parallel</span></label>
+              </div>
+              <label class="field field-tight"><span>Parallel workers</span>
+                <input id="parallel_workers" type="number" min="1" max="16" step="1" placeholder="blank = 8" title="Concurrent downloads when 'URLs in parallel' is on and the job has multiple URLs. Ignored for single-URL jobs and when speed-priority is set.">
+              </label>
+              <label class="field field-tight"><span>Proxy (this download — overrides the default)</span>
+                <input id="proxy" type="text" placeholder="socks5://host:port · blank = direct" title="Route yt-dlp through a proxy that EXITS on a remote server, so your ISP can't read the video hostname (SNI) and can't throttle it. Fastest option: a dedicated VPS. Two easy forms: (1) SSH tunnel — run 'ssh -D 1080 user@your-vps' then enter socks5://127.0.0.1:1080 (listens locally but exits from the VPS). (2) Direct proxy — socks5://VPS_IP:1080. A proxy that exits on THIS machine does not help.">
+              </label>
+              <p class="field-help muted">On a throttling ISP (carrier/5G home), a proxy that exits on a <strong>remote</strong> server bypasses per-hostname video shaping for downloads only — no system-wide VPN. Simplest: <code>ssh -D 1080 user@vps</code> then <code>socks5://127.0.0.1:1080</code>.</p>
+            </div>
+          </details>
+
+          <details class="adv-section" id="adv_notify">
+            <summary class="adv-label">Notify <span class="adv-hint-inline">webhook on finish</span></summary>
+            <div class="adv-body">
+              <div class="notify-block">
+                <label class="field field-tight"><span>Webhook URL</span>
+                  <input id="notify_url" spellcheck="false" autocomplete="off"
+                         placeholder="https://discord.com/api/webhooks/… · ntfy · Slack">
+                </label>
+                <div class="notify-row">
+                  <label class="field field-tight"><span>Format</span>
+                    <select id="notify_template" title="How the POST body is shaped">
+                      <option value="auto" selected>Auto-detect</option>
+                      <option value="discord">Discord</option>
+                      <option value="slack">Slack</option>
+                      <option value="ntfy">ntfy</option>
+                      <option value="raw">Raw JSON</option>
+                    </select>
+                  </label>
+                  <div class="notify-actions">
+                    <button type="button" id="notify_test" class="browse notify-test-btn" title="Send a sample POST now">Test</button>
+                  </div>
+                </div>
+                <p class="field-help muted" id="notify_help">
+                  POSTs when a job finishes (success or fail). Public https only — private/local URLs are blocked. Prefer Discord / ntfy / Slack.
+                </p>
+                <p class="hint" id="notify_hint" aria-live="polite"></p>
+              </div>
+            </div>
+          </details>
+
+          <details class="adv-section" id="adv_network">
+            <summary class="adv-label">Settings <span class="adv-hint-inline">proxy · anti-throttle</span></summary>
+            <div class="adv-body">
+              <label class="chk"><input type="checkbox" id="network_desync"><span>Bypass ISP throttling (local — no VPN)</span></label>
+              <p class="field-help muted">If your ISP throttles YouTube (carrier/5G home internet), turn this on. The app runs a tiny local proxy that hides the video hostname from your ISP's traffic inspection, so downloads run at full speed. No VPN, no account, nothing to install — leave it on. <span id="network_desync_status" class="net-status"></span></p>
+              <label class="chk"><input type="checkbox" id="network_doh"><span>Also encrypt DNS (DNS-over-HTTPS via 1.1.1.1)</span></label>
+              <p class="field-help muted">Resolves video hostnames through Cloudflare's encrypted DNS (1.1.1.1) instead of your ISP's, so an ISP that blocks or redirects by DNS can't interfere. Applies when the bypass (re)starts; falls back to normal DNS automatically. Leave off if downloads already work.</p>
+              <hr class="soft">
+              <label class="chk"><input type="checkbox" id="network_enabled"><span>Or route through a remote proxy</span></label>
+              <div class="row2 net-proxy-row">
+                <label class="field field-tight"><span>Type</span>
+                  <select id="network_proxy_scheme">
+                    <option value="socks5">SOCKS5</option>
+                    <option value="socks5h">SOCKS5h · remote DNS</option>
+                    <option value="socks4">SOCKS4</option>
+                    <option value="http">HTTP</option>
+                  </select>
+                </label>
+                <label class="field field-tight"><span>Address · IP:PORT</span>
+                  <input id="network_proxy_hostport" type="text" placeholder="127.0.0.1:1080" autocomplete="off" spellcheck="false"
+                    title="Host and port only, e.g. 127.0.0.1:1080. Passwordless. Blank = off.">
+                </label>
+              </div>
+              <p class="field-help muted">Passwordless only, applied to every download while checked. The local bypass above takes precedence when both are on. e.g. an SSH tunnel: <code>ssh -D 1080 user@vps</code> → SOCKS5 · <code>127.0.0.1:1080</code>.</p>
+              <div class="checks net-actions">
+                <button type="button" class="ghost" id="network_save">Save</button>
+                <button type="button" class="ghost" id="network_test">Test proxy</button>
+                <span id="network_status" class="net-status"></span>
+              </div>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <!-- PIPELINE -->
+      <section class="panel queue" id="pipeline">
+        <div class="panel-hd">
+          <span class="tick">02</span>
+          <h2>Pipeline</h2>
+          <div class="q-actions">
+            <button id="pause" class="ghost" type="button" title="Pause or resume the worker">pause</button>
+            <button id="retry" class="ghost" type="button" title="Re-queue every failed job">retry failed</button>
+            <button id="clear" class="ghost" type="button" title="Remove done &amp; cancelled jobs from the list">clear done</button>
+          </div>
+        </div>
+        <div class="pipe-toolbar">
+          <div class="pipe-filters" id="pipe_filters" role="group" aria-label="Filter jobs by status">
+            <button type="button" class="pipe-filter is-active" data-filter="all" aria-pressed="true">All <span class="pipe-n" data-n="all">0</span></button>
+            <button type="button" class="pipe-filter" data-filter="active" aria-pressed="false">Active <span class="pipe-n" data-n="active">0</span></button>
+            <button type="button" class="pipe-filter" data-filter="failed" aria-pressed="false">Failed <span class="pipe-n" data-n="failed">0</span></button>
+            <button type="button" class="pipe-filter" data-filter="done" aria-pressed="false">Done <span class="pipe-n" data-n="done">0</span></button>
+          </div>
+          <p class="pipe-banner" id="pipe_banner" hidden></p>
+        </div>
+        <!-- Terminal job transitions only (done / failed / cancelled). Deliberately NOT on #jobs
+             itself: the progress text and bar rewrite roughly once a second per running job, so a
+             live region over the whole list would babble continuously. This announces the outcome
+             once per job, which is the part a non-sighted user actually needs. -->
+        <p id="jobs_live" class="visually-hidden" role="status" aria-live="polite"></p>
+        <div id="jobs" class="jobs">
+          <div class="empty">
+            <div class="empty-art" aria-hidden="true">▶</div>
+            <p class="empty-title">No jobs yet</p>
+            <p class="empty-sub">Paste a YouTube URL in <strong>Compose</strong> and hit <strong>Queue job</strong> — live progress lands here.</p>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- ========== WATCH (secondary) ========== -->
+  <div class="view view-secondary" id="view-watch" role="tabpanel" aria-labelledby="nav-watch" hidden>
+    <section class="panel watch-panel">
+      <div class="panel-hd">
+        <span class="tick">03</span>
+        <h2>Watch channels</h2>
+        <span class="panel-note">follow channels · new uploads list here until you say download</span>
+      </div>
+      <p class="watch-intro">Paste a channel link, leave <strong>Auto-download</strong> off (recommended), then Start watching. New uploads show up as a list until you download them — nothing downloads until you say so.</p>
+      <div class="watch-add">
+        <div class="watch-add-primary">
+          <label class="field watch-url"><span>Channel link or @handle</span>
+            <input id="watch_channel" spellcheck="false" placeholder="https://youtube.com/@channel — Enter to start">
+          </label>
+          <label class="field watch-sel"><span>Quality</span>
+            <select id="watch_quality" title="Download quality for new videos"><option>1080p</option><option>best</option><option>4k</option><option>720p</option><option>audio</option></select>
+          </label>
+          <label class="field watch-sel"><span>Delivery</span>
+            <select id="watch_profile" title="Delivery for new videos — remux keeps the original; other options re-encode"><option value="">Remux — keep original (fast)</option><option value="premiere_h264_fast">Re-encode · Premiere H.264 (fast)</option><option value="premiere_prores_lt">Re-encode · Premiere ProRes LT</option><option value="dnxhr_sq">Re-encode · DNxHR SQ</option></select>
+          </label>
+          <button id="watch_add" class="browse watch-add-btn">Start watching</button>
+        </div>
+        <div class="watch-add-toggles">
+          <label class="chk"><input type="checkbox" id="watch_noshorts" checked><span>Skip YouTube Shorts</span></label>
+          <label class="chk" title="On: new uploads download automatically. Off (recommended): list them here so you pick."><input type="checkbox" id="watch_autoqueue"><span>Auto-download new videos</span></label>
+          <details class="watch-add-more">
+            <summary>More options</summary>
+            <div class="watch-add-advanced">
+              <select id="watch_markers" title="Export chapter markers"><option value="">Chapter markers: Off</option><option value="edl">EDL</option><option value="csv">CSV</option><option value="fcpxml">FCPXML</option><option value="all">All formats</option></select>
+              <select id="watch_organize" title="Organize into subfolders"><option value="">Folder layout: Don’t organize</option><option value="uploader">By channel name</option><option value="date">By upload date</option></select>
+              <label class="chk" title="Write a Kodi/Plex/Jellyfin .nfo sidecar"><input type="checkbox" id="watch_nfo"><span>Library info file (Plex / Jellyfin)</span></label>
+              <label class="chk" title="Normalize loudness to -14 LUFS"><input type="checkbox" id="watch_loudnorm"><span>Even out volume</span></label>
+              <input id="watch_filter_title" spellcheck="false" placeholder="Title filter (regex, optional)" title="Only take uploads whose title matches this regex (case-insensitive)">
+              <input id="watch_min_dur" type="number" min="0" placeholder="Min seconds" title="Skip uploads shorter than N seconds">
+              <input id="watch_max_dur" type="number" min="0" placeholder="Max seconds" title="Skip uploads longer than N seconds">
+              <input id="watch_after" spellcheck="false" placeholder="Published after (YYYY-MM-DD)" title="Only take uploads published on or after this date">
+            </div>
+          </details>
+        </div>
+      </div>
+      <!-- role=status: the outcome of a watch action (queued N of M, nothing to skip, a failure)
+           is announced, matching what #jobs_live does for the pipeline. -->
+      <p class="hint" id="watch_hint" role="status" aria-live="polite"></p>
+      <div id="watches" class="watches">
+        <div class="empty">
+          <div class="empty-art" aria-hidden="true">📡</div>
+          <p class="empty-title">No channels watched yet</p>
+          <p class="empty-sub">Paste a channel link above and <strong>Start watching</strong> — new uploads will queue up here for you to approve.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ========== AUTH (secondary) ========== -->
+  <div class="view view-secondary" id="view-auth" role="tabpanel" aria-labelledby="nav-auth" hidden>
+    <section class="panel auth-panel">
+      <div class="panel-hd">
+        <span class="tick">04</span>
+        <h2>Auth</h2>
+        <span class="panel-note">cookies unlock age-gated &amp; throttled downloads</span>
+      </div>
+
+      <!-- Hero action strip: always visible, hard to miss -->
+      <div class="auth-hero" id="auth-hero">
+        <div class="auth-hero-copy">
+          <p class="auth-hero-kicker" id="auth-hero-kicker">Session</p>
+          <p class="auth-hero-title" id="auth-hero-title">Checking cookies…</p>
+          <p class="auth-hero-sub" id="auth-browser-note">Detecting installed browsers…</p>
+        </div>
+        <div class="auth-hero-actions">
+          <button type="button" class="auth-btn auth-btn-primary" id="auth-login-btn" title="Open real Chrome with a private profile">Login with Chrome</button>
+          <button type="button" class="auth-btn auth-btn-secondary" id="auth-from-browser-btn" title="Read cookies from an installed browser">Import from browser</button>
+          <button type="button" class="auth-btn auth-btn-ghost" id="auth_help_btn" aria-expanded="false" aria-controls="auth-help-panel">How to sign in</button>
+        </div>
+      </div>
+
+      <!-- Help panel: closed by default (animated via .is-open) -->
+      <div class="auth-help-panel" id="auth-help-panel" aria-hidden="true">
+        <div class="auth-help-clip">
+        <div class="auth-help-inner">
+          <div class="auth-help-hd">
+            <h3>How to sign in</h3>
+            <button type="button" class="auth-btn auth-btn-ghost auth-help-close" id="auth_help_close" aria-label="Close help">Close</button>
+          </div>
+          <p class="auth-help-lead">
+            Auth stores <strong>YouTube cookies</strong> so age-gated and throttled videos can download.
+            Cookies stay on this computer only.
+          </p>
+
+          <div class="auth-help-grid">
+            <section class="auth-help-card">
+              <h4>What you need</h4>
+              <ul>
+                <li><strong>Chrome</strong> (best), or Firefox / Brave / Edge</li>
+                <li>A YouTube account you can sign into</li>
+                <li>Nothing else - Playwright is <em>not</em> required</li>
+              </ul>
+              <p class="auth-req-live" id="auth-req-live">Checking this machine…</p>
+            </section>
+
+            <section class="auth-help-card">
+              <h4>1 · Login with Chrome <span class="auth-help-tag">new session</span></h4>
+              <ol>
+                <li>Click the gold <strong>Login with Chrome</strong> button</li>
+                <li>Chrome opens (private yt_final profile)</li>
+                <li>Sign into YouTube as usual</li>
+                <!-- Neutral until /api/health reports HOST_OS. The browser being quit runs on the
+                     host, so a hardcoded Cmd+Q is wrong whenever that host is Windows. Never infer
+                     this from the viewer UA; an operator-managed tunnel or remote-control client
+                     can make the viewer and host differ without changing the loopback policy. -->
+                <li>Quit that browser with <kbd class="quit-hint">quit it fully</kbd></li>
+                <li>Click <strong>Test cookies</strong></li>
+              </ol>
+            </section>
+
+            <section class="auth-help-card">
+              <h4>2 · Import from browser <span class="auth-help-tag">already signed in</span></h4>
+              <ol>
+                <li>Confirm YouTube is signed in (daily Chrome)</li>
+                <li>Fully quit the browser - <kbd class="quit-hint">quit it fully</kbd></li>
+                <li>Pick browser → <strong>Import from browser</strong></li>
+                <li>Click <strong>Test cookies</strong></li>
+              </ol>
+            </section>
+
+            <section class="auth-help-card">
+              <h4>3 · cookies.txt file</h4>
+              <ol>
+                <li>Export with a “Get cookies.txt LOCALLY” extension</li>
+                <li>Import file or paste → <strong>Import file</strong></li>
+                <li>Click <strong>Test cookies</strong></li>
+              </ol>
+            </section>
+          </div>
+
+          <p class="auth-help-foot">
+            After any method, status should show <strong>valid: true</strong>.
+            Cookies expire - if downloads fail auth again, re-login or re-import.
+            Terminal: <code>python yt_final.py auth login</code>
+          </p>
+        </div>
+        </div>
+      </div>
+
+      <div class="auth-grid">
+        <div class="auth-card">
+          <h3 class="card-label">Session status</h3>
+          <p class="auth-status" id="auth_status">checking…</p>
+          <p class="hint" id="auth_hint" role="status" aria-live="polite"></p>
+          <div class="auth-toolbar" role="group" aria-label="Session tools">
+            <button type="button" class="auth-btn auth-btn-tool" id="auth_test" title="Probe cookies against YouTube">Test cookies</button>
+            <button type="button" class="auth-btn auth-btn-tool" id="auth_refresh" title="Re-check / re-acquire cookies">Refresh</button>
+            <button type="button" class="auth-btn auth-btn-danger" id="auth_clear" title="Delete local cookie store">Clear</button>
+          </div>
+        </div>
+
+        <div class="auth-card">
+          <h3 class="card-label">More options</h3>
+          <label class="field auth-browser-field auth-browser-field-block">
+            <span>Browser for import</span>
+            <select id="auth-browser">
+              <option value="auto">auto (detect)</option>
+              <option value="chrome">Chrome</option>
+              <option value="firefox">Firefox</option>
+              <option value="brave">Brave</option>
+              <option value="edge">Edge</option>
+            </select>
+          </label>
+          <h3 class="card-label auth-import-hd">cookies.txt file</h3>
+          <div class="auth-import">
+            <div class="path-row auth-file-row">
+              <!-- A real <button>, not a <label for>: a label is not focusable and the file input is
+                   hidden (out of the tab order), so this was reachable by MOUSE ONLY — keyboard
+                   users had no route to the file picker at all. Same fix as #cookiefile_upload_btn. -->
+              <button type="button" class="browse auth-file-label" id="auth_file_btn">Choose cookies.txt…</button>
+              <input type="file" id="auth-file" accept=".txt,text/plain" hidden>
+              <span class="auth-file-name" id="auth-file-name"></span>
+            </div>
+            <label class="field">
+              <span>…or paste contents</span>
+              <textarea id="auth-paste" rows="3" spellcheck="false" placeholder="# Netscape HTTP Cookie File…"></textarea>
+            </label>
+            <button class="auth-btn auth-btn-secondary auth-import-go" id="auth-import-btn" type="button">Import file</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ========== SPEED TEST (network diagnostic) ========== -->
+  <div class="view view-secondary" id="view-speedtest" role="tabpanel" aria-labelledby="nav-speedtest" hidden>
+    <section class="panel st-panel">
+      <div class="panel-hd">
+        <span class="tick">04</span>
+        <h2>Speed test</h2>
+        <span class="panel-note">why are downloads slow — and the one thing to press</span>
+        <div class="q-actions">
+          <button id="st_run" class="primary" type="button">Run speed test</button>
+        </div>
+      </div>
+
+      <p class="st-intro" id="st_intro">
+        This checks your connection, then downloads a real YouTube video two ways — straight, and through the
+        built-in bypass — so it can tell you exactly what's slowing you down and the single fix that helps most.
+        It takes about a minute and touches nothing until you press a button on a result.
+      </p>
+
+      <!-- Optional: test a proxy or VPN too -->
+      <details class="st-proxy" id="st_proxy_box">
+        <summary>Also test a proxy or VPN <span class="adv-hint-inline">optional</span></summary>
+        <div class="st-proxy-body">
+          <p class="field-help muted">
+            Want to see how a proxy or VPN would do? Two ways:
+          </p>
+          <ol class="st-proxy-steps">
+            <li><strong>A proxy</strong> — pick a type and paste <code>IP:PORT</code> (passwordless). The test measures YouTube through it too, alongside straight and bypass.</li>
+            <li><strong>A VPN</strong> — turn your VPN on, then run the test. It detects the VPN exit and measures YouTube through it. Turn the VPN off and re-run to compare against your real ISP.</li>
+          </ol>
+          <div class="st-proxy-row">
+            <select id="st_proxy_scheme" aria-label="Proxy type">
+              <option value="socks5">SOCKS5</option>
+              <option value="socks5h">SOCKS5h</option>
+              <option value="socks4">SOCKS4</option>
+              <option value="http">HTTP</option>
+            </select>
+            <input id="st_proxy_hostport" type="text" placeholder="127.0.0.1:1080" autocomplete="off" spellcheck="false"
+                   inputmode="text" aria-label="Proxy host and port" />
+          </div>
+          <p class="field-help st-proxy-err" id="st_proxy_err" role="alert" hidden></p>
+        </div>
+      </details>
+
+      <!-- Live phase readout while a run is in flight -->
+      <div class="st-phases" id="st_phases" role="status" aria-live="polite" hidden></div>
+
+      <!-- Results: verdict + comparison bars + ranked actions (filled by renderSpeedTest) -->
+      <div class="st-results" id="st_results" role="region" aria-live="polite" aria-label="Speed test results">
+        <div class="empty empty-inline">
+          <div class="empty-art" aria-hidden="true">⚡</div>
+          <p class="empty-title">No test yet</p>
+          <p class="empty-sub">Press <strong>Run speed test</strong>. Best done when nothing is downloading.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ========== UPDATES (toolchain health) ========== -->
+  <div class="view view-secondary" id="view-updates" role="tabpanel" aria-labelledby="nav-updates" hidden>
+    <section class="panel updates-panel">
+      <div class="panel-hd">
+        <span class="tick">05</span>
+        <h2>Updates</h2>
+        <span class="panel-note">what is installed, what needs a fix</span>
+        <div class="q-actions">
+          <button id="updates_check" class="ghost" type="button">Scan now</button>
+        </div>
+      </div>
+
+      <p class="updates-summary" id="updates_summary">Click <strong>Scan now</strong> to check download packages, FFmpeg, and optional helpers on this computer.</p>
+      <p class="hint">Python dependency updates require installing a future reviewed yt_final release. Version 1.0.0 never installs or activates app-writable Python code.</p>
+      <p class="hint" id="updates_hint" role="status" aria-live="polite"></p>
+
+      <!-- Plain-language glossary -->
+      <div class="upd-glossary" aria-label="What the terms mean">
+        <div class="upd-gloss-card">
+          <h3>Host computer</h3>
+          <p>The machine running this app (auto-detected as Windows, macOS, or Linux). Install buttons only run on the matching system.</p>
+        </div>
+        <div class="upd-gloss-card">
+          <h3>Download packages</h3>
+          <p><strong>yt-dlp</strong> downloads videos. <strong>yt-dlp-ejs</strong> helps YouTube nsig. Python package changes ship only in a future reviewed yt_final release. The optional bgutil server remains a manual setup.</p>
+        </div>
+        <div class="upd-gloss-card">
+          <h3>System FFmpeg</h3>
+          <p>Whatever FFmpeg is already on your PATH. Used for encode/remux. Never deleted or replaced by this tab.</p>
+        </div>
+        <div class="upd-gloss-card">
+          <h3>Managed FFmpeg</h3>
+          <p>Optional private copy stored only for yt_final on Windows x86_64. macOS uses a manual or Homebrew FFmpeg installation.</p>
+        </div>
+      </div>
+
+      <!-- Host system strip -->
+      <div class="upd-host-card" id="updates_host_card">
+        <div class="upd-host-main">
+          <span class="upd-host-kicker">This computer</span>
+          <p class="upd-host-title" id="updates_host_title">Detecting host…</p>
+          <p class="upd-host-sub" id="updates_host_sub">Scan or unlock loads the real OS from the server.</p>
+        </div>
+        <div class="upd-host-meta" id="updates_host_meta" hidden>
+          <div class="upd-host-chip"><span>Platform</span><strong id="updates_host_platform">—</strong></div>
+          <div class="upd-host-chip"><span>Managed FFmpeg folder</span><code id="updates_host_ffmpeg_loc">—</code></div>
+        </div>
+      </div>
+
+      <!-- Dynamic sections filled by renderUpdates -->
+      <div id="updates_body" class="upd-sections">
+        <div class="empty empty-inline upd-empty-block">
+          <div class="empty-art" aria-hidden="true">⟳</div>
+          <p class="empty-title">No scan yet</p>
+          <p class="empty-sub">Hit <strong>Scan now</strong>. Results cache for about 90 seconds so reopening this tab stays quick.</p>
+        </div>
+      </div>
+
+      <!-- Hidden template nodes retained for live FFmpeg setup selector synchronization. -->
+      <div class="upd-os-bar" id="updates_os_bar" hidden>
+        <span class="upd-os-label">FFmpeg target</span>
+        <div class="upd-os-tabs" role="group" aria-label="FFmpeg setup platform">
+          <button type="button" class="upd-os-tab" data-os="Windows" id="upd_os_windows" aria-pressed="false">Windows</button>
+          <button type="button" class="upd-os-tab" data-os="macOS" id="upd_os_macos" aria-pressed="false">macOS</button>
+        </div>
+        <span class="upd-os-detect" id="updates_os_detect"></span>
+      </div>
+
+      <div class="updates-warnings" id="updates_warnings" hidden></div>
+      <pre class="updates-log" id="updates_log" hidden></pre>
+
+      <details class="upd-help">
+        <summary>More detail (install locations and status words)</summary>
+        <ul>
+          <li><strong>current / ready</strong> — installed and matches the latest known version (or optional helper is present).</li>
+          <li><strong>missing / offline</strong> — not installed, or an optional helper is unavailable. Manual-only rows provide guidance and no action button.</li>
+          <li><strong>script</strong> — a manually configured bgutil PO helper was detected.</li>
+          <li><strong>outdated</strong> — installed but a newer version was reported. Install a future reviewed yt_final release to change Python packages.</li>
+          <li><strong>broken</strong> — package files were found but import failed; install a future reviewed yt_final release.</li>
+          <li><strong>managed / system</strong> — FFmpeg source (app-managed pair vs system install).</li>
+          <li><strong>Windows managed FFmpeg</strong> - <code>%LOCALAPPDATA%\yt_final\ffmpeg</code> · <code>ffmpeg.exe</code></li>
+          <li><strong>macOS FFmpeg</strong> - managed download is disabled; install FFmpeg manually or with Homebrew.</li>
+        </ul>
+      </details>
+    </section>
+  </div>
+
+  <!-- ========== FIELD GUIDE (secondary) ========== -->
+  <div class="view view-secondary" id="view-guide" role="tabpanel" aria-labelledby="nav-guide" hidden>
+    <section class="panel guide">
+      <div class="panel-hd">
+        <span class="tick">06</span>
+        <h2>Field guide</h2>
+        <span class="panel-note">map of Workspace controls · same labels as the form</span>
+      </div>
+      <div class="guide-scroll" id="guide_scroll">
+        <div class="guide-layout">
+
+          <nav class="guide-toc guide-reveal" aria-label="Field guide sections">
+            <p class="guide-toc-label">Jump to</p>
+            <a class="guide-toc-link" href="#g-start">Start here</a>
+            <a class="guide-toc-link" href="#g-compose">Main compose</a>
+            <a class="guide-toc-link" href="#g-access">Access</a>
+            <a class="guide-toc-link" href="#g-clip">Clip range</a>
+            <a class="guide-toc-link" href="#g-batch">Channels &amp; playlists</a>
+            <a class="guide-toc-link" href="#g-audio">Audio &amp; subs</a>
+            <a class="guide-toc-link" href="#g-editors">For editors</a>
+            <a class="guide-toc-link" href="#g-perf">Performance</a>
+            <a class="guide-toc-link" href="#g-notify">Notify</a>
+            <a class="guide-toc-link" href="#g-more">Pipeline &amp; keys</a>
+          </nav>
+
+          <div class="guide-body">
+
+            <header class="guide-hero guide-reveal" id="g-start">
+              <h3>Start here</h3>
+              <p class="guide-hero-lead">Controls below use the <em>exact names</em> on Workspace. Most jobs only need Main compose. Open <strong>Advanced</strong> only for cookies, clips, subtitles, or editor extras.</p>
+              <ol class="guide-steps">
+                <li><strong>Typical edit:</strong> paste URL → <em>Max resolution</em> 1080p → <em>Preferred stream</em> H.264 → <em>Delivery</em> Remux → <strong>Queue job</strong>.</li>
+                <li><strong>4K source?</strong> Click <strong>Check available formats</strong>, then Preferred stream <em>AV1</em> or <em>VP9</em> (H.264 almost never goes above 1080p).</li>
+                <li><strong>Bot / sign-in error?</strong> Use the <strong>Auth</strong> tab (or Advanced → Access), then retry.</li>
+              </ol>
+            </header>
+
+            <!-- MAIN COMPOSE: form order, full-width rows -->
+            <section class="guide-block guide-reveal" id="g-compose">
+              <h3 class="guide-block-title">Main compose</h3>
+              <p class="guide-block-lead">Always visible on Workspace → Compose job. Top to bottom matches the form.</p>
+
+              <article class="guide-row" data-control="urls">
+                <div class="guide-path"><span class="guide-path-sec">Compose</span><span class="guide-path-name">YouTube URL(s) — one per line</span></div>
+                <h4>YouTube URL(s)</h4>
+                <p>Big text box at the top. One link per line = one job. Playlists and channel pages work too.</p>
+              </article>
+
+              <article class="guide-row" data-control="quality">
+                <div class="guide-path"><span class="guide-path-sec">Compose</span><span class="guide-path-name">Max resolution</span></div>
+                <h4>Max resolution</h4>
+                <p>First dropdown under the URL. Cap how tall the video can be. Higher = sharper and larger files.</p>
+                <div class="guide-opts" role="list">
+                  <div class="guide-opt" role="listitem"><span class="guide-opt-k">1080p</span><span class="guide-opt-v">Best everyday for editing. Pairs with H.264, reasonable size.</span></div>
+                  <div class="guide-opt" role="listitem"><span class="guide-opt-k">best</span><span class="guide-opt-v">Highest YouTube offers (often 4K). Big files.</span></div>
+                  <div class="guide-opt" role="listitem"><span class="guide-opt-k">4k · 1440p · 720p · 480p</span><span class="guide-opt-v">Hard ceiling at that height.</span></div>
+                  <div class="guide-opt" role="listitem"><span class="guide-opt-k">audio</span><span class="guide-opt-v">Sound only. Then set <em>Audio file format</em> under Advanced → Audio &amp; subtitles.</span></div>
+                </div>
+              </article>
+
+              <article class="guide-row" data-control="codec">
+                <div class="guide-path"><span class="guide-path-sec">Compose</span><span class="guide-path-name">Preferred stream</span></div>
+                <h4>Preferred stream</h4>
+                <p>Middle dropdown. Which YouTube format family to grab. Not the re-encode codec (that is <em>Encoder profile</em> when Delivery is Re-encode).</p>
+                <div class="guide-opts" role="list">
+                  <div class="guide-opt" role="listitem"><span class="guide-opt-k">H.264 — edit-ready</span><span class="guide-opt-v">Plays and edits almost everywhere. Best default. Usually max 1080p.</span></div>
+                  <div class="guide-opt" role="listitem"><span class="guide-opt-k">AV1 — smaller / archive</span><span class="guide-opt-v">Smaller files for the same look. Good for 4K archives.</span></div>
+                  <div class="guide-opt" role="listitem"><span class="guide-opt-k">VP9 — common 4K</span><span class="guide-opt-v">YouTube’s usual 4K stream. Larger than AV1.</span></div>
+                  <div class="guide-opt" role="listitem"><span class="guide-opt-k">Any — largest available</span><span class="guide-opt-v">No preference; take the biggest / best listed stream.</span></div>
+                </div>
+              </article>
+
+              <article class="guide-row" data-control="encode_mode">
+                <div class="guide-path"><span class="guide-path-sec">Compose</span><span class="guide-path-name">Delivery</span></div>
+                <h4>Delivery</h4>
+                <p>Third dropdown. What happens after download.</p>
+                <div class="guide-opts" role="list">
+                  <div class="guide-opt" role="listitem"><span class="guide-opt-k">Remux — keep original (fast)</span><span class="guide-opt-v">Default. Repackage + optional chapters/metadata. No quality loss.</span></div>
+                  <div class="guide-opt" role="listitem"><span class="guide-opt-k">Re-encode — editor profile</span><span class="guide-opt-v">Transcode with Encoder profile. Masters, smaller files, burn-in subs. Shows Encoder profile.</span></div>
+                  <div class="guide-opt" role="listitem"><span class="guide-opt-k">Download only — no processing</span><span class="guide-opt-v">Raw download as-is (skips remux extras).</span></div>
+                </div>
+              </article>
+
+              <article class="guide-row" data-control="profile">
+                <div class="guide-path"><span class="guide-path-sec">Compose</span><span class="guide-path-name">Encoder profile</span><span class="guide-path-hint">only when Delivery = Re-encode</span></div>
+                <h4>Encoder profile</h4>
+                <p>Encoder preset when re-encoding. List fills after GPU detect.</p>
+                <div class="guide-opts" role="list">
+                  <div class="guide-opt" role="listitem"><span class="guide-opt-k">premiere_h264_* / nvenc_*</span><span class="guide-opt-v">NVIDIA GPU (fast). Premiere-friendly H.264 / HEVC / AV1.</span></div>
+                  <div class="guide-opt" role="listitem"><span class="guide-opt-k">amf_* · qsv_*</span><span class="guide-opt-v">AMD or Intel hardware encoders.</span></div>
+                  <div class="guide-opt" role="listitem"><span class="guide-opt-k">cpu_h265 · cpu_av1*</span><span class="guide-opt-v">Software encode (slower, high quality / smaller).</span></div>
+                  <div class="guide-opt" role="listitem"><span class="guide-opt-k">prores_* · dnxhr_* · dnxhd_*</span><span class="guide-opt-v">Editing masters (.mov) for Resolve, Premiere, Avid.</span></div>
+                </div>
+                <p class="guide-note">Missing encoder → automatic fallback (e.g. AV1 → HEVC → H.264).</p>
+              </article>
+
+              <article class="guide-row" data-control="probe">
+                <div class="guide-path"><span class="guide-path-sec">Compose</span><span class="guide-path-name">Check available formats</span></div>
+                <h4>Check available formats</h4>
+                <p>Button under the three dropdowns. Asks YouTube what heights this URL offers (no download). Use before 4K / AV1 / VP9; can set Max resolution for you.</p>
+              </article>
+
+              <article class="guide-row" data-control="output_dir">
+                <div class="guide-path"><span class="guide-path-sec">Compose</span><span class="guide-path-name">Save to folder</span></div>
+                <h4>Save to folder</h4>
+                <p>Path field with <strong>Browse…</strong>. Where finished files land. Default <code>downloads</code>. Created if missing.</p>
+              </article>
+
+              <article class="guide-row" data-control="submit">
+                <div class="guide-path"><span class="guide-path-sec">Compose</span><span class="guide-path-name">Queue job</span></div>
+                <h4>Queue job</h4>
+                <p>Green ▶ button. Adds job(s) to the queue. Progress shows in the <strong>Pipeline</strong> panel on the right.</p>
+              </article>
+            </section>
+
+            <!-- ADVANCED: collapsible panels matching drawer -->
+            <section class="guide-block guide-reveal" id="g-advanced">
+              <h3 class="guide-block-title">Advanced drawer</h3>
+              <p class="guide-block-lead">Click <strong>Advanced · cookies · clip · …</strong> under Queue job. Sections below match that drawer. Expand only what you need.</p>
+
+              <details class="guide-panel" id="g-access" open>
+                <summary>
+                  <span class="guide-panel-name">Access</span>
+                  <span class="guide-panel-hint">sign-in / throttle · linked to Auth</span>
+                </summary>
+                <div class="guide-panel-body">
+                  <div class="guide-path"><span class="guide-path-sec">Advanced · Access</span><span class="guide-path-name">Auth session</span></div>
+                  <p>Cookies live on the top-nav <strong>Auth</strong> tab. Jobs use that session automatically. The status banner here mirrors Auth.</p>
+                  <div class="guide-opts" role="list">
+                    <div class="guide-opt" role="listitem"><span class="guide-opt-k">Auth session (default)</span><span class="guide-opt-v">Login with Chrome or Import on <strong>Auth</strong>. Nothing else needed on Compose.</span></div>
+                    <div class="guide-opt" role="listitem"><span class="guide-opt-k">Override for this job only</span><span class="guide-opt-v">Collapsed. <em>Browse…</em> picks a local <code>cookies.txt</code>; <em>Upload…</em> saves an export for one job. Clear to use Auth again. Browser login stays on the Auth tab.</span></div>
+                  </div>
+                  <p class="guide-note">Use <strong>Open Auth</strong> on the banner, or the top-nav Auth tab.</p>
+                </div>
+              </details>
+
+              <details class="guide-panel" id="g-clip">
+                <summary>
+                  <span class="guide-panel-name">Clip range</span>
+                  <span class="guide-panel-hint">optional · short clips only</span>
+                </summary>
+                <div class="guide-panel-body">
+                  <div class="guide-path"><span class="guide-path-sec">Advanced · Clip range</span><span class="guide-path-name">Start / End</span></div>
+                  <h4>Time range (clip)</h4>
+                  <p>Set <em>Start</em> and <em>End</em> (MM:SS or seconds). Empty = full video. Status line shows the validated range. Invalid ranges block Queue job (no silent full download).</p>
+                  <div class="guide-opts" role="list">
+                    <div class="guide-opt" role="listitem"><span class="guide-opt-k">Precise cut</span><span class="guide-opt-v">Optional. Frame-accurate edges via FFmpeg (slower). Default cuts at the nearest keyframe.</span></div>
+                  </div>
+                  <p class="guide-note">Clips are slower per megabyte than full downloads. Engine forces built-in download (not aria2/turbo).</p>
+                </div>
+              </details>
+
+              <details class="guide-panel" id="g-batch">
+                <summary>
+                  <span class="guide-panel-name">Channels &amp; playlists</span>
+                  <span class="guide-panel-hint">archive · folder layout</span>
+                </summary>
+                <div class="guide-panel-body">
+                  <div class="guide-path"><span class="guide-path-sec">Advanced · Channels &amp; playlists</span><span class="guide-path-name">Archive file</span></div>
+                  <p>For pulling the same channel or playlist again. The archive lists the video ids already downloaded, so the next run takes only new uploads.</p>
+                  <div class="guide-opts" role="list">
+                    <div class="guide-opt" role="listitem"><span class="guide-opt-k">Skip videos already downloaded</span><span class="guide-opt-v">Checkbox. Blank <em>Archive file</em> keeps <code>yt-final-archive.txt</code> inside <strong>Save to folder</strong>. <em>Browse…</em> reuses an archive you already have.</span></div>
+                    <div class="guide-opt" role="listitem"><span class="guide-opt-k">Folder layout</span><span class="guide-opt-v">Subfolder per channel (<em>By channel name</em>) or per upload date (<em>By upload date</em>). Same choice as the Watch tab.</span></div>
+                  </div>
+                  <p class="guide-note">Clip jobs ignore the archive (a clip must not mark the whole video done). <em>Turbo only</em> falls back to the built-in downloader when an archive is set.</p>
+                </div>
+              </details>
+
+              <details class="guide-panel" id="g-audio">
+                <summary>
+                  <span class="guide-panel-name">Audio &amp; subtitles</span>
+                  <span class="guide-panel-hint">sound · captions</span>
+                </summary>
+                <div class="guide-panel-body">
+                  <div class="guide-path"><span class="guide-path-sec">Advanced</span><span class="guide-path-name">Audio &amp; subtitles</span></div>
+                  <div class="guide-opts" role="list">
+                    <div class="guide-opt" role="listitem"><span class="guide-opt-k">Audio codec</span><span class="guide-opt-v"><em>copy</em> keeps YouTube audio; <em>aac</em> usual re-encode. Leave “(profile default)” unless you need a specific choice.</span></div>
+                    <div class="guide-opt" role="listitem"><span class="guide-opt-k">Loudness target (LUFS)</span><span class="guide-opt-v">Optional volume match. <code>-14</code> streaming, <code>-16</code> podcast, <code>-23</code> broadcast. Blank = skip.</span></div>
+                    <div class="guide-opt" role="listitem"><span class="guide-opt-k">SponsorBlock</span><span class="guide-opt-v"><em>off</em> · <em>mark as chapters</em> tags sponsors · <em>cut segments out</em> removes them.</span></div>
+                    <div class="guide-opt" role="listitem"><span class="guide-opt-k">Subtitle languages</span><span class="guide-opt-v">Comma list e.g. <code>en,es</code>. Empty = no subs.</span></div>
+                    <div class="guide-opt" role="listitem"><span class="guide-opt-k">How to attach subtitles</span><span class="guide-opt-v"><em>sidecar file</em> = separate .srt · <em>embed soft track</em> = inside file · <em>burn-in</em> forces re-encode.</span></div>
+                    <div class="guide-opt" role="listitem"><span class="guide-opt-k">Subtitle format</span><span class="guide-opt-v">srt, vtt, or both.</span></div>
+                    <div class="guide-opt" role="listitem"><span class="guide-opt-k">Audio file format</span><span class="guide-opt-v">Only when Max resolution is <em>audio</em>. Prefer <em>best</em> unless you need mp3 / flac / etc.</span></div>
+                  </div>
+                </div>
+              </details>
+
+              <details class="guide-panel" id="g-editors">
+                <summary>
+                  <span class="guide-panel-name">For editors</span>
+                  <span class="guide-panel-hint">NLE · markers · sidecars</span>
+                </summary>
+                <div class="guide-panel-body">
+                  <div class="guide-path"><span class="guide-path-sec">Advanced</span><span class="guide-path-name">For editors</span></div>
+                  <p class="guide-cluster-label">Markers</p>
+                  <div class="guide-opts" role="list">
+                    <div class="guide-opt" role="listitem"><span class="guide-opt-k">Timeline markers (chapters → editor)</span><span class="guide-opt-v">Chapters → editor markers. <em>EDL</em> Resolve · <em>CSV</em> Premiere · <em>FCPXML</em> Final Cut · <em>all three</em>.</span></div>
+                  </div>
+                  <p class="guide-cluster-label">Embed in file</p>
+                  <div class="guide-opts" role="list">
+                    <div class="guide-opt" role="listitem"><span class="guide-opt-k">chapters</span><span class="guide-opt-v">Store YouTube chapters in the media (on by default).</span></div>
+                    <div class="guide-opt" role="listitem"><span class="guide-opt-k">metadata tags</span><span class="guide-opt-v">Title, channel, date, URL, description.</span></div>
+                    <div class="guide-opt" role="listitem"><span class="guide-opt-k">thumbnail</span><span class="guide-opt-v">Embed YouTube thumbnail as cover art.</span></div>
+                  </div>
+                  <p class="guide-cluster-label">Sidecars</p>
+                  <div class="guide-opts" role="list">
+                    <div class="guide-opt" role="listitem"><span class="guide-opt-k">info.json</span><span class="guide-opt-v">Full metadata for archives / asset tools.</span></div>
+                    <div class="guide-opt" role="listitem"><span class="guide-opt-k">description+vtt sidecars</span><span class="guide-opt-v">Extra text / caption files beside the video.</span></div>
+                    <div class="guide-opt" role="listitem"><span class="guide-opt-k">.nfo (Plex/Jellyfin)</span><span class="guide-opt-v">Media-server friendly info file.</span></div>
+                  </div>
+                  <p class="guide-cluster-label">Other</p>
+                  <div class="guide-opts" role="list">
+                    <div class="guide-opt" role="listitem"><span class="guide-opt-k">create editing proxy</span><span class="guide-opt-v">Lighter proxy for scrubbing in the editor.</span></div>
+                    <div class="guide-opt" role="listitem"><span class="guide-opt-k">keep HDR metadata (re-encode)</span><span class="guide-opt-v">Keep HDR10/HLG labels when re-encoding (on by default).</span></div>
+                    <div class="guide-opt" role="listitem"><span class="guide-opt-k">skip YouTube Shorts</span><span class="guide-opt-v">Ignore Shorts on playlists / channels.</span></div>
+                  </div>
+                </div>
+              </details>
+
+              <details class="guide-panel" id="g-perf">
+                <summary>
+                  <span class="guide-panel-name">Performance</span>
+                  <span class="guide-panel-hint">engine · GPU · parallel</span>
+                </summary>
+                <div class="guide-panel-body">
+                  <div class="guide-path"><span class="guide-path-sec">Advanced</span><span class="guide-path-name">Performance</span></div>
+                  <p>How bytes are fetched and what this machine can re-encode with. Remux ignores GPU.</p>
+                  <div class="guide-opts" role="list">
+                    <div class="guide-opt" role="listitem"><span class="guide-opt-k">GPU / Encoders (auto)</span><span class="guide-opt-v">Status strip. Detected graphics + working encode codecs. Auto-filled.</span></div>
+                    <div class="guide-opt" role="listitem"><span class="guide-opt-k">Download engine</span><span class="guide-opt-v"><em>Auto</em> / <em>Built-in</em> = normal yt-dlp. <em>Hybrid</em> may pick turbo or aria2. <em>aria2 only</em> / <em>Turbo only</em> pin a helper (install it manually if missing).</span></div>
+                    <div class="guide-opt" role="listitem"><span class="guide-opt-k">download URLs in parallel</span><span class="guide-opt-v">Checkbox. Several URLs start together instead of one-by-one.</span></div>
+                  </div>
+                  <p class="guide-note">Certified Node and Deno builds can be installed on the <strong>Updates</strong> tab; aria2c, turbo, and Playwright require manual installation.</p>
+                </div>
+              </details>
+
+              <details class="guide-panel" id="g-notify">
+                <summary>
+                  <span class="guide-panel-name">Notify</span>
+                  <span class="guide-panel-hint">webhook on finish</span>
+                </summary>
+                <div class="guide-panel-body">
+                  <div class="guide-path"><span class="guide-path-sec">Advanced · Notify</span><span class="guide-path-name">Webhook URL</span></div>
+                  <p>Optional public https URL. App POSTs when a job finishes (success or fail). Use <em>Test</em> for a sample ping. Format auto-detects Discord / Slack / ntfy. Private/local hosts are blocked.</p>
+                </div>
+              </details>
+            </section>
+
+            <!-- FOOT: pipeline + keyboard + tip -->
+            <section class="guide-foot guide-reveal" id="g-more">
+              <div class="guide-foot-grid">
+                <div class="guide-foot-card" data-control="pipeline">
+                  <div class="guide-path"><span class="guide-path-sec">Workspace</span><span class="guide-path-name">Pipeline</span></div>
+                  <h4>Pipeline (job list)</h4>
+                  <p>Live queue next to Compose. Filter All / Active / Failed / Done.</p>
+                  <div class="guide-opts" role="list">
+                    <div class="guide-opt" role="listitem"><span class="guide-opt-k">pause</span><span class="guide-opt-v">Pause or resume the worker.</span></div>
+                    <div class="guide-opt" role="listitem"><span class="guide-opt-k">retry failed</span><span class="guide-opt-v">Re-queue every failed job.</span></div>
+                    <div class="guide-opt" role="listitem"><span class="guide-opt-k">clear done</span><span class="guide-opt-v">Remove finished / cancelled from the list (files stay).</span></div>
+                  </div>
+                </div>
+                <div class="guide-foot-card" data-control="keyboard">
+                  <div class="guide-path"><span class="guide-path-sec">Anywhere</span><span class="guide-path-name">Keyboard</span></div>
+                  <h4>Keyboard</h4>
+                  <div class="guide-opts" role="list">
+                    <div class="guide-opt" role="listitem"><span class="guide-opt-k">Enter</span><span class="guide-opt-v">Submit focused form (login, queue, watch, path).</span></div>
+                    <div class="guide-opt" role="listitem"><span class="guide-opt-k">Esc</span><span class="guide-opt-v">Close Advanced and open panels.</span></div>
+                    <div class="guide-opt" role="listitem"><span class="guide-opt-k">Tab / Shift-Tab</span><span class="guide-opt-v">Move between controls.</span></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="guide-tip">
+                <h4>Downloads feel slow or stuck?</h4>
+                <p>Often YouTube is throttling your IP after many pulls. Fix: sign in with cookies on the <strong>Auth</strong> tab (Premium helps more). Clear <em>Time range</em> if you set a clip - full videos use the fast path. Leave the IP alone for a while if it still crawls.</p>
+              </div>
+            </section>
+
+          </div><!-- /.guide-body -->
+        </div><!-- /.guide-layout -->
+      </div>
+    </section>
+  </div>
+</main>
+
+<footer class="shell foot">
+  <span>stdlib http · local application · single-writer journal</span>
+  <div class="foot-right">
+    <button type="button" id="logout" class="ghost foot-logout" title="Sign out">sign out</button>
+  </div>
+</footer>
+</div><!-- /#app-root -->
+
+<script src="/static/app.js"></script>
+</body>
+</html>

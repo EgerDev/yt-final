@@ -1,0 +1,31 @@
+# Keep line endings sane across the Mac <-> Windows workflow.
+# Without this, Windows git checks out CRLF and commits it back, and the Mac then
+# sees every file as modified (this repo already had a 77-file CRLF->LF cleanup once).
+
+# Default: store text as LF in the repo, check out LF everywhere.
+# Python, Node and every editor here handle LF fine on Windows.
+* text=auto eol=lf
+
+# Windows batch MUST stay CRLF — cmd.exe mis-parses labels/goto in LF-only .bat files.
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+
+# Shell scripts MUST stay LF — CRLF breaks the shebang ("bad interpreter: ^M").
+*.sh       text eol=lf
+*.command  text eol=lf
+
+# Binary assets — never touch these.
+*.ttf   binary
+*.woff  binary
+*.woff2 binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.zip   binary
+*.exe   binary
+*.mp4   binary
+*.mkv   binary
+*.webm  binary

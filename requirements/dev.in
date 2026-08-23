@@ -1,0 +1,8 @@
+# Runtime compatibility floors plus the reviewed test, lint, type, and audit runners.
+-r ../Final/requirements.txt
+mypy==2.3.0
+pip-audit==2.10.1
+pytest==9.1.1
+ruff==0.16.0
+setuptools==83.0.0
+types-regex==2026.7.19.20260720

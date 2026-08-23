@@ -1,0 +1,56 @@
+include CHANGELOG.md
+include CODE_OF_CONDUCT.md
+include CONTRIBUTING.md
+include docs/ARCHITECTURE.md
+include docs/CLI.md
+include docs/CONFIGURATION.md
+include docs/RELEASING.md
+include docs/TROUBLESHOOTING.md
+include LICENSE
+include MANIFEST.in
+include pyproject.toml
+include README.md
+include SECURITY.md
+include setup.py
+
+include release/portable-files.txt
+include requirements/README.md
+include requirements/build.in
+include requirements/build.lock
+include requirements/dev.in
+include requirements/dev.lock
+include requirements/release.in
+include requirements/release.lock
+include scripts/__init__.py
+include scripts/build_portable.py
+include scripts/make_public_tree.py
+include scripts/verify_release.py
+include scripts/write_checksums.py
+
+recursive-include Final *.py
+include Final/approved-python.lock
+include Final/assets/slate.ttf
+recursive-include Final/examples *.json *.toml
+include Final/INNOVATION_ROADMAP.md
+include Final/README.md
+include Final/requirements.txt
+include Final/Start?yt_final.bat
+include Final/Start?yt_final.command
+include Final/THIRD_PARTY_NOTICES
+recursive-include Final/webui *.css *.html *.js
+
+prune .claude
+prune .git
+prune .github
+prune .superpowers
+prune .worktrees
+prune archive
+prune build
+prune dist
+prune downloads
+prune Final/docs
+prune Final/downloads
+prune mcps
+prune test_out
+global-exclude *.log
+global-exclude *.py[cod]

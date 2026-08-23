@@ -1,0 +1,44 @@
+# yt_final config — reusable named presets.
+# Use with:  python yt_final.py --config examples/config.example.toml --preset archive download URL
+# (or copy to ~/.yt_final/config.toml and just use  --preset archive)
+#
+# Precedence: [defaults]  <  [preset.NAME]  <  explicit CLI flags.
+
+[defaults]
+quality = "1080p"
+codec = "h264"
+encode_mode = "copy"
+chapters = true
+embed_metadata = true
+preserve_hdr = true
+
+# Editorial master: ProRes HQ, 24-bit PCM audio, subtitles embedded, loudness for broadcast.
+[preset.editorial]
+encode_mode = "reencode"
+profile = "prores_hq"
+audio_codec = "pcm_s24le"
+sub_langs = ["en"]
+sub_mode = "embed"
+loudnorm = -16
+
+# Small AV1 archive copy with film-grain synthesis (great for grainy/film content).
+[preset.archive]
+quality = "4k"
+codec = "av1"
+encode_mode = "reencode"
+profile = "cpu_av1_svt_filmgrain"
+embed_thumbnail = true
+write_sidecar = true
+
+# Lossless audio pull for music/sound editorial.
+[preset.audio]
+quality = "audio"
+audio_format = "flac"
+loudnorm = -14
+
+# Web delivery: capped-size AV1 on the GPU, -14 LUFS, SponsorBlock segments cut out.
+[preset.web]
+encode_mode = "reencode"
+profile = "nvenc_av1_vbr"
+loudnorm = -14
+sponsorblock = "remove"

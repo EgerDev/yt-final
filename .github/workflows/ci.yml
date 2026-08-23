@@ -1,0 +1,674 @@
+name: Tier 1 CI
+
+on:
+  push:
+  pull_request:
+  workflow_call:
+    inputs:
+      source_sha:
+        description: Exact commit SHA to check out and certify
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  ci:
+    name: ${{ matrix.native_target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2025
+            architecture: x64
+            python: "3.11"
+            native_target: windows-x86_64-py311
+            upload: true
+            browsers: "chromium"
+          - runner: windows-2025
+            architecture: x64
+            python: "3.14"
+            native_target: windows-x86_64-py314
+            upload: false
+            browsers: ""
+          - runner: macos-15-intel
+            architecture: x64
+            python: "3.11"
+            native_target: macos-x86_64-py311
+            upload: false
+            browsers: ""
+          - runner: macos-15-intel
+            architecture: x64
+            python: "3.14"
+            native_target: macos-x86_64-py314
+            upload: false
+            browsers: ""
+          - runner: macos-15
+            architecture: arm64
+            python: "3.11"
+            native_target: macos-arm64-py311
+            upload: false
+            browsers: "chromium webkit"
+          - runner: macos-15
+            architecture: arm64
+            python: "3.14"
+            native_target: macos-arm64-py314
+            upload: false
+            browsers: ""
+    steps:
+      - name: Check out the immutable workflow commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          clean: true
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ inputs.source_sha || github.sha }}
+
+      - name: Select native CPython
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          architecture: ${{ matrix.architecture }}
+          python-version: ${{ matrix.python }}
+
+      - name: Select locked Node.js for repository quality gates
+        if: ${{ matrix.upload || matrix.browsers != '' }}
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "24.18.0"
+          package-manager-cache: false
+
+      - name: Establish external release state
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+
+          function Export-CiEnvironment {
+            param(
+              [Parameter(Mandatory = $true)][string] $Name,
+              [Parameter(Mandatory = $true)][string] $Value
+            )
+            if ([string]::IsNullOrWhiteSpace($Value)) {
+              throw "CI environment value for $Name is empty"
+            }
+            Add-Content -LiteralPath $env:GITHUB_ENV -Value "$Name=$Value" -Encoding utf8
+          }
+
+          $runnerTemp = [IO.Path]::GetFullPath("${{ runner.temp }}")
+          $releaseRoot = Join-Path $runnerTemp "yt-final-ci"
+          $stateRoot = Join-Path $releaseRoot "state"
+          $homeRoot = Join-Path $stateRoot "home"
+          $tempRoot = Join-Path $stateRoot "temp"
+          $pipCache = Join-Path $stateRoot "pip-cache"
+          $pycache = Join-Path $stateRoot "pycache"
+          $ruffCache = Join-Path $stateRoot "ruff-cache"
+          $buildEnvironment = Join-Path $releaseRoot "build-environment"
+          $devEnvironment = Join-Path $releaseRoot "dev-environment"
+          $releaseEnvironment = Join-Path $releaseRoot "release-environment"
+          $environmentPython = if ($IsWindows) {
+            "Scripts/python.exe"
+          } else {
+            "bin/python"
+          }
+
+          $statePaths = [ordered]@{
+            APPDATA = Join-Path $stateRoot "appdata"
+            HOME = $homeRoot
+            LOCALAPPDATA = Join-Path $stateRoot "local-appdata"
+            TEMP = $tempRoot
+            TMP = $tempRoot
+            TMPDIR = $tempRoot
+            USERPROFILE = $homeRoot
+            XDG_CACHE_HOME = Join-Path $stateRoot "xdg-cache"
+            XDG_CONFIG_HOME = Join-Path $stateRoot "xdg-config"
+            XDG_DATA_HOME = Join-Path $stateRoot "xdg-data"
+            XDG_RUNTIME_DIR = Join-Path $stateRoot "xdg-runtime"
+            XDG_STATE_HOME = Join-Path $stateRoot "xdg-state"
+          }
+          foreach ($path in @(
+            $releaseRoot
+            $statePaths.Values
+            $pipCache
+            $pycache
+            $ruffCache
+          )) {
+            New-Item -ItemType Directory -Path $path -Force | Out-Null
+          }
+          foreach ($entry in $statePaths.GetEnumerator()) {
+            Export-CiEnvironment $entry.Key $entry.Value
+          }
+
+          Export-CiEnvironment "BUILD_ENVIRONMENT" $buildEnvironment
+          Export-CiEnvironment "DEV_ENVIRONMENT" $devEnvironment
+          Export-CiEnvironment "RELEASE_ENVIRONMENT" $releaseEnvironment
+          Export-CiEnvironment "BUILD_PYTHON" (
+            Join-Path $buildEnvironment $environmentPython
+          )
+          Export-CiEnvironment "DEV_PYTHON" (
+            Join-Path $devEnvironment $environmentPython
+          )
+          Export-CiEnvironment "RELEASE_PYTHON" (
+            Join-Path $releaseEnvironment $environmentPython
+          )
+          Export-CiEnvironment "ARTIFACT_DIR" (
+            Join-Path $runnerTemp "release-artifacts"
+          )
+          Export-CiEnvironment "CLEAN_SOURCE" (
+            Join-Path $runnerTemp "clean-source"
+          )
+          Export-CiEnvironment "PIP_CACHE_DIR" $pipCache
+          Export-CiEnvironment "PIP_CONFIG_FILE" $(
+            if ($IsWindows) { "NUL" } else { "/dev/null" }
+          )
+          Export-CiEnvironment "PIP_DISABLE_PIP_VERSION_CHECK" "1"
+          Export-CiEnvironment "PIP_NO_INPUT" "1"
+          Export-CiEnvironment "PYTHONDONTWRITEBYTECODE" "1"
+          Export-CiEnvironment "PYTHONNOUSERSITE" "1"
+          Export-CiEnvironment "PYTHONPYCACHEPREFIX" $pycache
+          Export-CiEnvironment "RUFF_CACHE_DIR" $ruffCache
+
+      - name: Create isolated lock environments
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          $basePython = (Get-Command python -ErrorAction Stop).Source
+
+          & $basePython -I -B -m venv --without-pip --copies `
+            $env:BUILD_ENVIRONMENT
+          & $basePython -I -B -m venv --without-pip --copies `
+            $env:DEV_ENVIRONMENT
+          & $basePython -I -B -m venv --without-pip --copies `
+            $env:RELEASE_ENVIRONMENT
+
+          & $basePython -I -B -m pip --isolated `
+            --python $env:BUILD_PYTHON install `
+            --require-hashes --only-binary=:all: `
+            -r requirements/build.lock
+          & $env:BUILD_PYTHON -I -B -m pip --isolated `
+            --python $env:DEV_PYTHON install `
+            --require-hashes --only-binary=:all: `
+            -r requirements/dev.lock
+          & $env:BUILD_PYTHON -I -B -m pip --isolated `
+            --python $env:RELEASE_PYTHON install `
+            --require-hashes --only-binary=:all: `
+            -r requirements/release.lock
+
+          & $env:BUILD_PYTHON -I -B -m pip --isolated check
+          & $env:BUILD_PYTHON -I -B -m pip --isolated `
+            --python $env:DEV_PYTHON check
+          & $env:BUILD_PYTHON -I -B -m pip --isolated `
+            --python $env:RELEASE_PYTHON check
+
+      - name: Verify the native lock closure
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          $env:YT_FINAL_VERIFY_NATIVE_LOCK = "1"
+          $env:YT_FINAL_LOCK_PYTHON = $env:BUILD_PYTHON
+          $env:YT_FINAL_NATIVE_TARGET = "${{ matrix.native_target }}"
+          & $env:DEV_PYTHON -B -m pytest -q -p no:cacheprovider `
+            --basetemp (Join-Path $env:RUNNER_TEMP "native-lock-pytest") `
+            Final/test_release_packaging.py::test_dependency_locks_install_natively_with_hashes
+
+      - name: Run static quality gates
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          if (-not $env:PYTHONPYCACHEPREFIX.StartsWith($env:RUNNER_TEMP)) {
+            throw "compileall cache must be outside the checkout"
+          }
+          & $env:DEV_PYTHON -I -B -m ruff check Final scripts
+          & $env:DEV_PYTHON -I -B -m compileall -q Final scripts
+          Push-Location Final
+          try {
+            & $env:DEV_PYTHON -I -B _syntax_check.py
+          } finally {
+            Pop-Location
+          }
+
+      - name: Run locked repository quality gates
+        if: ${{ matrix.upload }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+
+          & $env:DEV_PYTHON -I -B -m mypy `
+            Final/websessions.py `
+            Final/secureio.py `
+            Final/redaction.py `
+            Final/state_validation.py `
+            Final/watch_filters.py `
+            Final/url_identity.py `
+            Final/notifications.py `
+            Final/installer_lock.py `
+            Final/tool_manifest.py `
+            scripts
+          & $env:DEV_PYTHON -I -B -m pip_audit `
+            --strict --require-hashes -r requirements/release.lock
+          npm ci --ignore-scripts
+          npm run lint
+
+          $forbiddenScannerControls = @(
+            ".github/actionlint.yml"
+            ".github/actionlint.yaml"
+            ".gitleaks.toml"
+            ".gitleaksignore"
+          )
+          foreach ($relative in $forbiddenScannerControls) {
+            $candidate = Join-Path $env:GITHUB_WORKSPACE $relative
+            if (Test-Path -LiteralPath $candidate) {
+              throw "repository-controlled scanner configuration is forbidden: $relative"
+            }
+          }
+
+          function Assert-Sha256 {
+            param(
+              [Parameter(Mandatory = $true)][string] $Path,
+              [Parameter(Mandatory = $true)][string] $Expected
+            )
+            $actual = (
+              Get-FileHash -Algorithm SHA256 -LiteralPath $Path
+            ).Hash.ToLowerInvariant()
+            if ($actual -cne $Expected) {
+              throw "SHA-256 mismatch for $Path"
+            }
+          }
+
+          function Get-ReviewedManifestDigest {
+            param(
+              [Parameter(Mandatory = $true)][string] $Path,
+              [Parameter(Mandatory = $true)][string] $Filename
+            )
+            $digests = @()
+            foreach ($line in Get-Content -LiteralPath $Path) {
+              if (
+                $line -cmatch "^([0-9a-f]{64})[ `t]+[*]?(.+)$" -and
+                $Matches[2] -ceq $Filename
+              ) {
+                $digests += $Matches[1]
+              }
+            }
+            if ($digests.Count -ne 1) {
+              throw "reviewed manifest has no unique row for $Filename"
+            }
+            return $digests[0]
+          }
+
+          $toolRoot = Join-Path $env:RUNNER_TEMP "reviewed-quality-tools"
+          New-Item -ItemType Directory -Path $toolRoot | Out-Null
+
+          $actionlintName = "actionlint_1.7.12_windows_amd64.zip"
+          $actionlintManifestName = "actionlint_1.7.12_checksums.txt"
+          $actionlintDigest = (
+            "6e7241b51e6817ea6a047693d8e6fed13b31819c9a0dd6c5a726e1592d22f6e9"
+          )
+          $actionlintManifestDigest = (
+            "433028cf0ba3c42163ea1a668dedce30fcdbe84fe912b1a5e288c006eab8a4f5"
+          )
+          $actionlintBase = (
+            "https://github.com/rhysd/actionlint/releases/download/v1.7.12"
+          )
+          $actionlintArchive = Join-Path $toolRoot $actionlintName
+          $actionlintManifest = Join-Path $toolRoot $actionlintManifestName
+          Invoke-WebRequest `
+            -Uri "$actionlintBase/$actionlintName" `
+            -OutFile $actionlintArchive
+          Invoke-WebRequest `
+            -Uri "$actionlintBase/$actionlintManifestName" `
+            -OutFile $actionlintManifest
+          Assert-Sha256 $actionlintArchive $actionlintDigest
+          Assert-Sha256 $actionlintManifest $actionlintManifestDigest
+          if (
+            (Get-ReviewedManifestDigest `
+              $actionlintManifest $actionlintName) -cne $actionlintDigest
+          ) {
+            throw "actionlint release manifest disagrees with reviewed digest"
+          }
+          $actionlintRoot = Join-Path $toolRoot "actionlint"
+          Expand-Archive `
+            -LiteralPath $actionlintArchive `
+            -DestinationPath $actionlintRoot
+          $actionlint = Join-Path $actionlintRoot "actionlint.exe"
+          if (-not (Test-Path -LiteralPath $actionlint -PathType Leaf)) {
+            throw "reviewed actionlint archive has no executable"
+          }
+
+          $gitleaksName = "gitleaks_8.30.1_windows_x64.zip"
+          $gitleaksManifestName = "gitleaks_8.30.1_checksums.txt"
+          $gitleaksDigest = (
+            "d29144deff3a68aa93ced33dddf84b7fdc26070add4aa0f4513094c8332afc4e"
+          )
+          $gitleaksManifestDigest = (
+            "061476c21adaf5441516f96f185c1a4706a83cd6329b9b38762271b3d4a52fae"
+          )
+          $gitleaksConfigName = "gitleaks_8.30.1_config.toml"
+          $gitleaksConfigDigest = (
+            "e163e53b9e7e8a8511e77271e2b323ed057759542a6d988258afe3a1fa329caf"
+          )
+          $gitleaksBase = (
+            "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1"
+          )
+          $gitleaksConfigUrl = "https://raw.githubusercontent.com/gitleaks/gitleaks/v8.30.1/config/gitleaks.toml"
+          $gitleaksArchive = Join-Path $toolRoot $gitleaksName
+          $gitleaksManifest = Join-Path $toolRoot $gitleaksManifestName
+          $gitleaksConfig = Join-Path $toolRoot $gitleaksConfigName
+          Invoke-WebRequest `
+            -Uri "$gitleaksBase/$gitleaksName" `
+            -OutFile $gitleaksArchive
+          Invoke-WebRequest `
+            -Uri "$gitleaksBase/$gitleaksManifestName" `
+            -OutFile $gitleaksManifest
+          Invoke-WebRequest `
+            -Uri $gitleaksConfigUrl `
+            -OutFile $gitleaksConfig
+          Assert-Sha256 $gitleaksArchive $gitleaksDigest
+          Assert-Sha256 $gitleaksManifest $gitleaksManifestDigest
+          Assert-Sha256 $gitleaksConfig $gitleaksConfigDigest
+          if (
+            (Get-ReviewedManifestDigest `
+              $gitleaksManifest $gitleaksName) -cne $gitleaksDigest
+          ) {
+            throw "gitleaks release manifest disagrees with reviewed digest"
+          }
+          $gitleaksRoot = Join-Path $toolRoot "gitleaks"
+          Expand-Archive `
+            -LiteralPath $gitleaksArchive `
+            -DestinationPath $gitleaksRoot
+          $gitleaks = Join-Path $gitleaksRoot "gitleaks.exe"
+          if (-not (Test-Path -LiteralPath $gitleaks -PathType Leaf)) {
+            throw "reviewed gitleaks archive has no executable"
+          }
+
+          $workflowFiles = @(
+            Get-ChildItem .github/workflows -File |
+              Where-Object { $_.Extension -in @(".yml", ".yaml") } |
+              Sort-Object FullName |
+              ForEach-Object FullName
+          )
+          if ($workflowFiles.Count -eq 0) {
+            throw "no GitHub Actions workflows were found"
+          }
+          Push-Location $toolRoot
+          try {
+            & $actionlint @workflowFiles
+            & $gitleaks detect `
+              --source $env:GITHUB_WORKSPACE `
+              --config $gitleaksConfig `
+              --no-banner `
+              --redact `
+              --ignore-gitleaks-allow
+          } finally {
+            Pop-Location
+          }
+
+      - name: Run authenticated cross-browser gate
+        if: ${{ matrix.browsers != '' }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          $browserNames = "${{ matrix.browsers }}".Split(
+            " ",
+            [StringSplitOptions]::RemoveEmptyEntries
+          )
+          if ($browserNames.Count -eq 0) {
+            throw "browser matrix cell selected without a browser"
+          }
+          $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path `
+            $env:RUNNER_TEMP "playwright-browsers"
+          npm ci --ignore-scripts
+          foreach ($browserName in $browserNames) {
+            if ($browserName -notin @("chromium", "webkit")) {
+              throw "unreviewed Playwright browser: $browserName"
+            }
+            $env:YT_FINAL_BROWSER_NAME = $browserName
+            # The gate runs once per browser and stops at the first failure, so name the engine
+            # before each pass: otherwise a log that ends in a timeout does not say which
+            # browser was driving it.
+            Write-Host "Authenticated browser gate: $browserName"
+            npm exec -- playwright install $browserName
+            npm run test:browser
+          }
+
+      - name: Run focused release tests
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          & $env:DEV_PYTHON -B -m pytest -q -p no:cacheprovider `
+            --basetemp (Join-Path $env:RUNNER_TEMP "focused-pytest") `
+            Final/test_release_packaging.py `
+            Final/test_release_boundary.py `
+            Final/test_release_artifacts.py `
+            Final/test_release_workflows.py
+
+      - name: Run the complete root test suite
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          & $env:DEV_PYTHON -B -m pytest -q -p no:cacheprovider `
+            --basetemp (Join-Path $env:RUNNER_TEMP "complete-pytest")
+
+      - name: Smoke-test source entry points
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          & $env:DEV_PYTHON -B Final/yt_final.py --help
+          & $env:DEV_PYTHON -B Final/yt_final.py --version
+          & $env:DEV_PYTHON -B Final/yt_final.py list-profiles
+          & $env:DEV_PYTHON -B -m Final --help
+          & $env:DEV_PYTHON -B -m Final --version
+          & $env:DEV_PYTHON -B -m Final list-profiles
+
+      - name: Bind the immutable source identity
+        env:
+          REQUESTED_SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          $fullSha = (git rev-parse --verify "HEAD^{commit}").Trim()
+          if ($fullSha -cnotmatch "^[0-9a-f]{40}$") {
+            throw "HEAD did not resolve to one full commit SHA"
+          }
+          if ($fullSha -cne $env:REQUESTED_SOURCE_SHA) {
+            throw "checked-out commit does not equal the requested source SHA"
+          }
+          $epoch = (git show --no-patch --format=%ct $fullSha).Trim()
+          if ($epoch -cnotmatch "^[1-9][0-9]*$") {
+            throw "commit timestamp is not one canonical SOURCE_DATE_EPOCH"
+          }
+          $status = git status --porcelain=v1 --untracked-files=all
+          if ($LASTEXITCODE -ne 0) {
+            throw "git status failed"
+          }
+          if ($status) {
+            throw "quality verification changed the checkout: $status"
+          }
+          Add-Content -LiteralPath $env:GITHUB_ENV `
+            -Value "FULL_SHA=$fullSha" -Encoding utf8
+          Add-Content -LiteralPath $env:GITHUB_ENV `
+            -Value "SOURCE_DATE_EPOCH=$epoch" -Encoding utf8
+
+      - name: Run the Task 5 distribution gate
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          $env:YT_FINAL_VERIFY_DISTRIBUTIONS = "1"
+          $env:YT_FINAL_BUILD_PYTHON = $env:BUILD_PYTHON
+          $env:YT_FINAL_RELEASE_PYTHON = $env:RELEASE_PYTHON
+          & $env:DEV_PYTHON -B -m pytest -q -p no:cacheprovider `
+            --basetemp (Join-Path $env:RUNNER_TEMP "task5-pytest") `
+            Final/test_release_packaging.py::test_phase_b_clean_distribution_build_and_external_install
+
+      - name: Build release artifacts from a clean Git archive
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          if (Test-Path -LiteralPath $env:CLEAN_SOURCE) {
+            throw "clean source destination already exists"
+          }
+          if (Test-Path -LiteralPath $env:ARTIFACT_DIR) {
+            throw "artifact destination already exists"
+          }
+          New-Item -ItemType Directory -Path $env:CLEAN_SOURCE | Out-Null
+          New-Item -ItemType Directory -Path $env:ARTIFACT_DIR | Out-Null
+          $sourceArchive = Join-Path $env:RUNNER_TEMP "clean-source.tar"
+          git archive --format=tar "--output=$sourceArchive" $env:FULL_SHA
+          tar -xf $sourceArchive -C $env:CLEAN_SOURCE
+
+          $env:PIP_NO_INDEX = "1"
+          & $env:BUILD_PYTHON -I -B -m build --no-isolation --wheel --sdist `
+            --outdir $env:ARTIFACT_DIR $env:CLEAN_SOURCE
+          & $env:BUILD_PYTHON -I -B `
+            (Join-Path $env:CLEAN_SOURCE "scripts/build_portable.py") `
+            --repo-root $env:CLEAN_SOURCE `
+            --output-dir $env:ARTIFACT_DIR `
+            --epoch $env:SOURCE_DATE_EPOCH
+          & $env:BUILD_PYTHON -B `
+            (Join-Path $env:CLEAN_SOURCE "scripts/write_checksums.py") `
+            $env:ARTIFACT_DIR
+          & $env:RELEASE_PYTHON -I -B -m twine check `
+            (Join-Path $env:ARTIFACT_DIR "yt_final-1.0.0-py3-none-any.whl") `
+            (Join-Path $env:ARTIFACT_DIR "yt_final-1.0.0.tar.gz")
+
+      - name: Verify the wheel outside the checkout
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          $basePython = (Get-Command python -ErrorAction Stop).Source
+          $runtimeRoot = Join-Path $env:RUNNER_TEMP "runtime-wheel"
+          $runtimePython = Join-Path $runtimeRoot $(
+            if ($IsWindows) { "Scripts/python.exe" } else { "bin/python" }
+          )
+          $console = Join-Path $runtimeRoot $(
+            if ($IsWindows) { "Scripts/yt-final.exe" } else { "bin/yt-final" }
+          )
+          & $basePython -I -B -m venv --without-pip $runtimeRoot
+          & $env:RELEASE_PYTHON -I -B -m pip --isolated `
+            --python $runtimePython install `
+            --require-hashes --only-binary=:all: `
+            -r (Join-Path $env:CLEAN_SOURCE "Final/approved-python.lock")
+          & $env:RELEASE_PYTHON -I -B -m pip --isolated `
+            --python $runtimePython install --no-index --no-deps `
+            (Join-Path $env:ARTIFACT_DIR "yt_final-1.0.0-py3-none-any.whl")
+          & $env:RELEASE_PYTHON -I -B -m pip --isolated `
+            --python $runtimePython check
+
+          $unrelated = Join-Path $env:RUNNER_TEMP "runtime-unrelated-cwd"
+          New-Item -ItemType Directory -Path $unrelated | Out-Null
+          Push-Location $unrelated
+          try {
+            & $console --help
+            & $console --version
+            & $console list-profiles
+            & $runtimePython -I -B -m Final --help
+            $importProbe = @'
+          import os
+          import sys
+          import Final
+          runtime = os.path.realpath(sys.argv[1])
+          source = os.path.realpath(sys.argv[2])
+          imported = os.path.realpath(Final.__file__)
+          assert os.path.commonpath((runtime, imported)) == runtime
+          assert os.path.commonpath((source, imported)) != source
+          '@
+            & $runtimePython -I -B -c $importProbe `
+              $runtimeRoot $env:CLEAN_SOURCE
+          } finally {
+            Pop-Location
+          }
+
+      - name: Extract and smoke-test the portable archive
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          $portable = Join-Path $env:ARTIFACT_DIR "yt_final-1.0.0-portable.zip"
+          $extracted = Join-Path $env:RUNNER_TEMP "portable-extracted"
+          $unrelated = Join-Path $env:RUNNER_TEMP "portable-unrelated-cwd"
+          Expand-Archive -LiteralPath $portable -DestinationPath $extracted
+          New-Item -ItemType Directory -Path $unrelated | Out-Null
+          $portableSource = Join-Path $extracted "yt_final-1.0.0"
+          Push-Location $unrelated
+          try {
+            & $env:DEV_PYTHON -B `
+              (Join-Path $portableSource "Final/yt_final.py") --help
+            & $env:DEV_PYTHON -B `
+              (Join-Path $portableSource "Final/yt_final.py") --version
+            & $env:DEV_PYTHON -B `
+              (Join-Path $portableSource "Final/yt_final.py") list-profiles
+          } finally {
+            Pop-Location
+          }
+
+      - name: Enforce the exact upload allowlist
+        run: |
+          $ErrorActionPreference = "Stop"
+          $expected = @(
+            "SHA256SUMS"
+            "yt_final-1.0.0-portable.zip"
+            "yt_final-1.0.0-py3-none-any.whl"
+            "yt_final-1.0.0.tar.gz"
+          )
+          $entries = @(Get-ChildItem -LiteralPath $env:ARTIFACT_DIR -Force)
+          if (@($entries | Where-Object { $_.PSIsContainer }).Count -ne 0) {
+            throw "artifact directory contains a nested directory"
+          }
+          $actual = @($entries.Name | Sort-Object)
+          $difference = @(Compare-Object `
+            -ReferenceObject $expected `
+            -DifferenceObject $actual)
+          if ($difference.Count -ne 0) {
+            throw "artifact upload allowlist mismatch: $difference"
+          }
+
+          $manifest = Join-Path $env:ARTIFACT_DIR $expected[0]
+          $lines = @(Get-Content -LiteralPath $manifest)
+          if ($lines.Count -ne 3) {
+            throw "checksum manifest must contain exactly three rows"
+          }
+          $manifestNames = @()
+          foreach ($line in $lines) {
+            if ($line -cnotmatch "^([0-9a-f]{64})  ([^/\\]+)$") {
+              throw "noncanonical checksum row: $line"
+            }
+            $digest = $Matches[1]
+            $name = $Matches[2]
+            $manifestNames += $name
+            $actualDigest = (
+              Get-FileHash -Algorithm SHA256 `
+                -LiteralPath (Join-Path $env:ARTIFACT_DIR $name)
+            ).Hash.ToLowerInvariant()
+            if ($actualDigest -cne $digest) {
+              throw "checksum mismatch for $name"
+            }
+          }
+          if (@(Compare-Object `
+            -ReferenceObject $expected[1..3] `
+            -DifferenceObject @($manifestNames | Sort-Object)).Count -ne 0) {
+            throw "checksum manifest names do not match the artifact allowlist"
+          }
+
+      - name: Run the release artifact verifier
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          & $env:BUILD_PYTHON -B `
+            (Join-Path $env:CLEAN_SOURCE "scripts/verify_release.py") `
+            $env:ARTIFACT_DIR `
+            --expected-version 1.0.0 `
+            --trusted-source-root $env:CLEAN_SOURCE `
+            --expected-source-epoch $env:SOURCE_DATE_EPOCH
+
+      - name: Upload audited release artifacts
+        if: ${{ matrix.upload }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          archive: true
+          if-no-files-found: error
+          include-hidden-files: false
+          name: yt-final-1.0.0-${{ inputs.source_sha || github.sha }}
+          path: ${{ runner.temp }}/release-artifacts/**

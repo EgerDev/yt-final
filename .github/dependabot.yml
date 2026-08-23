@@ -1,0 +1,33 @@
+# Dependency updates for the ecosystems GitHub can actually read here.
+#
+# Deliberately no `pip` entry. The real runtime pins live in
+# Final/approved-python.lock and requirements/*.lock, which are pip-compile
+# outputs -- GitHub's dependency graph matches requirements*.txt,
+# pyproject.toml, poetry.lock, Pipfile.lock, pdm.lock and uv.lock, none of
+# which those are. A pip entry would therefore report against the unbounded
+# ">=" floors in Final/requirements.txt and say nothing about what actually
+# ships, which is worse than silence because it looks like coverage.
+# Python vulnerabilities are covered by the pip_audit gate in CONTRIBUTING.md
+# and by the scheduled audit workflow.
+version: 2
+updates:
+  # Nine third-party actions are pinned by commit SHA. Nothing else keeps
+  # those fresh, and a SHA pin cannot be read for vulnerabilities by eye.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+
+  # package-lock.json is a real lockfile in a supported format, so this one
+  # works as intended. It is development tooling only -- eslint and Playwright
+  # -- and nothing here reaches a user.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "build(deps)"

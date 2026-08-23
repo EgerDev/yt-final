@@ -1,0 +1,121 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+.artifacts/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+*.dist-info/
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+pytest-of-*/
+cover/
+
+# Translations
+*.mo
+*.pot
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE / editors
+.idea/
+.vscode/
+.claude/settings.local.json
+*.swp
+*.swo
+*~
+
+# JavaScript tooling
+node_modules/
+
+# Project specific
+downloads/
+encoder/
+scaled/
+some/
+tiktok/
+Final/downloads/
+Final/test_outputs/
+Final/*.log
+Final/serve*.log
+Final/final_yt.log
+*.log
+*.rar
+key.txt
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local state and secrets. NEVER commit these.
+#
+# A Netscape cookies.txt is a live, unexpirable Google session: possession is
+# account takeover across every Google service sharing those cookies. The
+# engine auto-discovers `./cookies.txt` from the working directory
+# (Final/cookie_providers.py), and the docs show `--cookies` with a relative
+# path, so a contributor following them lands one in the working tree. In a
+# public repository one `git add -A` in a fork publishes it, and git history
+# keeps it reachable long after the file is deleted.
+cookies.txt
+*cookies*.txt
+active.txt
+active_backup.txt
+webui.txt
+webui.url
+queue.json
+history.jsonl
+config.toml
+!Final/examples/config.example.toml
+.venv/
+Final/test_outputs/
+*.rar
+.superpowers/
+.worktrees/

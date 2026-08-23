@@ -1,0 +1,13 @@
+{
+  "name": "yt-final",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "lint": "eslint Final/webui/app.js playwright.config.mjs scripts/run_browser_test_server.mjs scripts/run_browser_tests.mjs tests/browser/fail_closed_reporter.mjs tests/browser/release.spec.mjs",
+    "test:browser": "node scripts/run_browser_tests.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.61.0",
+    "eslint": "10.8.0"
+  }
+}

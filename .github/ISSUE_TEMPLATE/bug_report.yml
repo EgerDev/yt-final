@@ -1,0 +1,91 @@
+name: Bug report
+description: Something behaves incorrectly on a supported platform
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        **Do not use this form for security vulnerabilities.** Report those
+        privately through the Security Advisory form linked on the new-issue
+        page.
+
+
+        Never paste real cookies, session tokens, passwords, or unredacted
+        browser traces. Logs redact these by default; if you edited a log, say
+        so.
+  - type: checkboxes
+    id: supported
+    attributes:
+      label: Supported platform
+      description: >-
+        1.0.0 supports Windows x86-64 and macOS Intel/Apple Silicon on Python
+        3.11–3.14. Linux is unsupported, and reports against it are usually
+        closed.
+      options:
+        - label: I am on a supported platform and Python version
+          required: true
+  - type: input
+    id: version
+    attributes:
+      label: yt_final version
+      description: Output of `yt-final --version` (or `python Final/yt_final.py --version`)
+      placeholder: "1.0.0"
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: OS, architecture, and Python
+      placeholder: "Windows 11 x86-64, Python 3.11.9"
+    validations:
+      required: true
+  - type: input
+    id: ffmpeg
+    attributes:
+      label: FFmpeg version
+      description: First line of `ffmpeg -version`. Say "not installed" if it is missing.
+      placeholder: "ffmpeg version 7.1 …"
+    validations:
+      required: true
+  - type: textarea
+    id: diagnose
+    attributes:
+      label: Output of `yt-final diagnose`
+      description: >-
+        Paste it verbatim. It answers the first three questions anyone would
+        ask, and often the report itself.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Exact reproduction
+      description: >-
+        The exact command or UI steps, starting from a clean state. A report
+        without a reproduction usually cannot be acted on.
+      placeholder: |
+        1. yt-final download "https://youtu.be/…" --profile prores_hq
+        2. …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result vs actual result
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: >-
+        Error text or the relevant log section. Confirm you have removed
+        anything sensitive.
+      render: text
+  - type: checkboxes
+    id: regression
+    attributes:
+      label: Regression
+      options:
+        - label: This worked in an earlier version (say which, above)

@@ -1,0 +1,44 @@
+name: Feature request
+description: Propose a capability that does not exist yet
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        1.0.0 is a compatibility-locked release. New behavior generally lands
+        in a later version, and proposals that would break the CLI, the
+        security boundary, or the supply-chain contract will be declined —
+        see `Final/INNOVATION_ROADMAP.md` for what is deliberately deferred.
+  - type: textarea
+    id: need
+    attributes:
+      label: What are you trying to do?
+      description: >-
+        Describe the editing or ingest workflow, not the implementation. The
+        most useful requests start from a concrete task that is currently
+        painful.
+    validations:
+      required: true
+  - type: textarea
+    id: current
+    attributes:
+      label: What do you do today instead?
+      description: Including any workaround, other tool, or manual step.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: If you have a specific interface in mind, sketch it.
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      description: >-
+        These are out of scope regardless of implementation quality.
+      options:
+        - label: >-
+            This does not involve bot-detection evasion, CAPTCHA
+            circumvention, or bulk access to other people's accounts
+          required: true

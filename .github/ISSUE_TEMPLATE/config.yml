@@ -1,0 +1,19 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Troubleshooting guide (try this first)
+    url: https://github.com/EgerDev/yt-final/blob/main/docs/TROUBLESHOOTING.md
+    about: >-
+      Bot checks, 403s, downloads capped near 1 MiB/s, missing hardware
+      encoders, and Web UI login trouble - with the command that diagnoses
+      each one.
+  - name: Security vulnerability (do not open an issue)
+    url: https://github.com/EgerDev/yt-final/security/advisories/new
+    about: >-
+      Report privately through the GitHub Security Advisory form. Never put
+      vulnerability details, credentials, cookies, or session tokens in a
+      public issue.
+  - name: Question or usage help
+    url: https://github.com/EgerDev/yt-final/discussions
+    about: >-
+      For "how do I…" questions. Bug reports and feature requests belong in an
+      issue so they can be tracked.
