@@ -22,8 +22,14 @@ class _FakeSocket:
         pass
 
 
+# get_all_cookies_via_cdp rejects a non-absolute browser path, and "C:/fake/chrome.exe" is NOT
+# absolute on POSIX -- it bails before reaching the logic under test. That made three of these
+# fail on macOS and, worse, made the fail-closed one pass for the wrong reason.
+_FAKE_EXE = "C:/fake/chrome.exe" if sys.platform.startswith("win") else "/fake/chrome"
+
+
 def _drive(monkeypatch, tmp_path, *, terminated=True, cleaned=True, cookies=None,
-           exe="C:/fake/chrome.exe", read_raises=None):
+           exe=_FAKE_EXE, read_raises=None):
     """Run get_all_cookies_via_cdp against a faked browser and return (result, reason)."""
     userdir = tmp_path / "snap"
     userdir.mkdir(exist_ok=True)

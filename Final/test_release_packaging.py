@@ -107,7 +107,7 @@ _skip_sdist_writer_on_win_nonreviewed = pytest.mark.skipif(
 REVIEWED_LOCK_INPUTS = {
     "build.in": {
         "build==1.5.0",
-        "pip==26.1.2",
+        "pip==26.2",
         "pip-tools==7.6.0",
         "setuptools==83.0.0",
         "wheel==0.47.0",
@@ -303,7 +303,7 @@ EXPECTED_DIRECT_LOCK_VERSIONS = {
     },
     "build": {
         "build": "1.5.0",
-        "pip": "26.1.2",
+        "pip": "26.2",
         "pip-tools": "7.6.0",
         "setuptools": "83.0.0",
         "wheel": "0.47.0",
@@ -327,7 +327,7 @@ EXPECTED_DIRECT_LOCK_VERSIONS = {
         "bgutil-ytdlp-pot-provider": "1.3.1",
         "build": "1.5.0",
         "packaging": "26.2",
-        "pip": "26.1.2",
+        "pip": "26.2",
         "pip-tools": "7.6.0",
         "regex": "2026.7.19",
         "requests": "2.34.2",
@@ -1062,8 +1062,8 @@ def _verified_lock_toolchain(lock_python, expected_python=(3, 11)):
     )
     assert probe.returncode == 0, probe.stdout + probe.stderr
     actual = json.loads(probe.stdout)
-    assert actual.get("pip") == "26.1.2", (
-        "reviewed lock toolchain requires pip==26.1.2"
+    assert actual.get("pip") == "26.2", (
+        "reviewed lock toolchain requires pip==26.2"
     )
     assert actual.get("pip-tools") == "7.6.0", (
         "reviewed lock toolchain requires pip-tools==7.6.0"
@@ -3472,7 +3472,7 @@ def _reviewed_tool_identity(**overrides):
         "gil_disabled": bool(sysconfig.get_config_var("Py_GIL_DISABLED")),
         "implementation": sys.implementation.name,
         "machine": machine,
-        "pip": "26.1.2",
+        "pip": "26.2",
         "pip-tools": "7.6.0",
         "platform": sys.platform,
         "platform_tag": platform_tag,
@@ -4097,7 +4097,7 @@ def test_lock_python_module_runner_revalidates_and_uses_returned_path(
 @pytest.mark.parametrize(
     ("tool", "wrong_version", "expected_error"),
     (
-        ("pip", "26.1.1", "pip==26.1.2"),
+        ("pip", "26.1.1", "pip==26.2"),
         ("pip-tools", "7.5.0", "pip-tools==7.6.0"),
     ),
 )
@@ -4109,7 +4109,7 @@ def test_wheel_evidence_rejects_the_wrong_toolchain(
         "YT_FINAL_LOCK_PYTHON",
         str(Path(sys.executable).resolve(strict=True)),
     )
-    versions = {"pip": "26.1.2", "pip-tools": "7.6.0"}
+    versions = {"pip": "26.2", "pip-tools": "7.6.0"}
     versions[tool] = wrong_version
     wrong_tools = subprocess.CompletedProcess(
         args=[],

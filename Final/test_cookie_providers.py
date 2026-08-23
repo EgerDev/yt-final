@@ -3130,6 +3130,7 @@ def test_cdp_windows_dacl_rejects_service_mutation_authority(
         cdp._require_windows_profile_dacl(123)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows ownership behavior")
 @pytest.mark.parametrize(
     "owner_sid",
     (
@@ -3158,6 +3159,7 @@ def test_cdp_windows_ancestor_owner_rejects_service_mutation_authority(
         cdp._require_windows_profile_owner(123, final=False)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows ownership behavior")
 def test_cdp_windows_ancestor_allows_only_exact_trustedinstaller_sid(
         monkeypatch):
     """The actual system-root owner is exact, not a service-SID wildcard."""
