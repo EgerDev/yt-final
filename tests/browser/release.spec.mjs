@@ -18,6 +18,13 @@ const SERVER_READY_TIMEOUT_MS = 45_000;
 // The restart receipts only cost one 100ms watcher tick plus the requested delay and the child's
 // exit, but that whole path competes with the browser for a loaded two-core runner.
 const RESTART_RECEIPT_TIMEOUT_MS = 20_000;
+// The client gives a login round trip 30s (runWithDeadline in app.js), but the global expect
+// budget is 10s. On a loaded two-core runner the POST competes with Chromium for CPU, so the
+// assertion could fire while a perfectly good login was still in flight -- the gate had not
+// lifted YET, not failed. That is the test being stricter than the contract it is testing, and
+// it showed up as an intermittent red on windows-x86_64-py311 with #app-root still hidden.
+// Matched to the client's own deadline so the assertion fails only when the login really did.
+const LOGIN_VISIBLE_TIMEOUT_MS = 30_000;
 const NETWORK_CONSOLE_NOISE = /Failed to load resource|Load failed|NetworkError|ERR_|offline|Fetch API cannot load/i;
 
 function observeRuntime(page) {
@@ -55,8 +62,12 @@ function acceptExpectedNetworkNoise(runtime, maximum) {
 async function login(page, password) {
   await page.locator("#login-password").fill(password);
   await page.locator("#login-submit").click();
-  await expect(page.locator("#app-root")).toBeVisible();
-  await expect(page.locator("#login-gate")).toBeHidden();
+  await expect(page.locator("#app-root")).toBeVisible({
+    timeout: LOGIN_VISIBLE_TIMEOUT_MS,
+  });
+  await expect(page.locator("#login-gate")).toBeHidden({
+    timeout: LOGIN_VISIBLE_TIMEOUT_MS,
+  });
 }
 
 async function readSession(page) {
@@ -216,6 +227,65 @@ test("runtime capture rejects network-like errors outside an expected window", a
   }
   expect(rejected).toBe(true);
 });
+
+test("a late session check does not wipe a password being typed", async ({
+  page,
+}) => {
+  const password = process.env.YT_FINAL_BROWSER_PASSWORD;
+  expect(Boolean(password)).toBe(true);
+  const runtime = observeRuntime(page);
+
+  // #login-gate is visible from the first paint, so a user can type while the app is still
+  // awaiting /api/session for a stored session. When that resolves to "not a live session" the
+  // app calls showLogin(), which used to clear the password field -- so the click that followed
+  // submitted an EMPTY password and the gate never lifted despite a correct password. The
+  // existing LOGIN_ATTEMPT_GENERATION guard does not cover it, because the generation only
+  // advances on submit.
+  //
+  // Reproduced through the real path rather than by poking an internal: seed a stale session so
+  // the restore actually runs, and hold /api/session open long enough to type underneath it.
+  let releaseSessionCheck;
+  const sessionCheckHeld = new Promise((resolve) => {
+    releaseSessionCheck = resolve;
+  });
+  await page.route("**/api/session", async (route) => {
+    await sessionCheckHeld;
+    await route.fulfill({
+      status: 401,
+      contentType: "application/json",
+      body: JSON.stringify({ ok: false, error: "expired" }),
+    });
+  });
+
+  await page.addInitScript(
+    ([key, ttl]) => {
+      localStorage.setItem(key, JSON.stringify({
+        token: "stale-token-from-a-previous-run",
+        expires_at: Math.floor(Date.now() / 1000) + ttl,
+      }));
+    },
+    [SESSION_KEY, DEFAULT_SESSION_TTL_SECONDS],
+  );
+
+  await page.goto("/");
+  await expect(page.locator("#login-gate")).toBeVisible();
+
+  // Type while the restore is still in flight, then let it fail.
+  await page.locator("#login-password").fill(password);
+  releaseSessionCheck();
+
+  // The late showLogin() lands here. The typed password must survive it.
+  await expect(page.locator("#login-msg")).toContainText(/session|sign in/i);
+  await expect(page.locator("#login-password")).toHaveValue(password);
+
+  await page.unroute("**/api/session");
+  await page.locator("#login-submit").click();
+  await expect(page.locator("#app-root")).toBeVisible();
+  await expect(page.locator("#login-gate")).toBeHidden();
+
+  acceptExpectedNetworkNoise(runtime, 1);
+});
+
 
 test("authentication and protected routes stay fail-closed", async ({
   browser,

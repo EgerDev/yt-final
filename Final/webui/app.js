@@ -491,20 +491,35 @@ function setLoginFeedback(message = '', severity = 'status') {
 }
 
 function showLogin(message = '', severity = 'status') {
-  document.body.classList.add('is-locked');
   const gate = $('login-gate');
   const root = $('app-root');
+  // Clearing the field is a logout hygiene measure: it must happen when the app is torn back
+  // down to the gate, so a password does not survive in the DOM. It must NOT happen when the
+  // gate is ALREADY up, because then the only thing in that field is what the user is typing
+  // right now, and wiping it silently submits an empty password.
+  //
+  // That is a real race, not a hypothetical. #login-gate is visible from the first paint, so a
+  // user can be typing while tryExistingSession() is still awaiting /api/session. When that
+  // request resolves to anything but a live session it calls showLogin(), which wiped the
+  // half-typed password. The existing LOGIN_ATTEMPT_GENERATION guard does not cover this: the
+  // generation only advances on SUBMIT, so someone who has typed but not yet clicked is
+  // unprotected. On CI this surfaced as the login gate never lifting after a correct password.
+  const wasLocked = !!gate && gate.hidden === false;
+  document.body.classList.add('is-locked');
   if (gate) gate.hidden = false;
   if (root) root.hidden = true;
   setLoginFeedback(message, severity);
   const pw = $('login-password');
   if (pw) {
-    pw.value = '';
+    if (!wasLocked) pw.value = '';
     if (LOGIN_FOCUS_TIMER != null) clearTimeout(LOGIN_FOCUS_TIMER);
-    LOGIN_FOCUS_TIMER = setTimeout(() => {
-      LOGIN_FOCUS_TIMER = null;
-      if (document.body.classList.contains('is-locked')) pw.focus();
-    }, 50);
+    // Do not steal focus from someone already typing in the gate either.
+    if (!wasLocked || document.activeElement !== pw) {
+      LOGIN_FOCUS_TIMER = setTimeout(() => {
+        LOGIN_FOCUS_TIMER = null;
+        if (document.body.classList.contains('is-locked')) pw.focus();
+      }, 50);
+    }
   }
 }
 
