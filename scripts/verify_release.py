@@ -1467,6 +1467,12 @@ def _metadata_version(body: bytes, *, label: str, expected_version: str) -> None
 
 
 
+
+def _normalize_newlines(value: bytes) -> bytes:
+    """Collapse CRLF to LF so a comparison does not depend on the building platform."""
+    return value.replace(b"\r\n", b"\n")
+
+
 def _first_metadata_divergence(expected: bytes, actual: bytes) -> str:
     """Describe the first line where two METADATA blobs differ, for an actionable failure."""
     expected_lines = expected.split(b"\r\n")
@@ -1933,14 +1939,24 @@ def verify_release(
         source_root,
         expected_version,
     )
-    if wheel_metadata != reviewed_metadata:
+    # Compare line-ending-insensitively. setuptools serialises METADATA through text I/O, so it
+    # emits CRLF on Windows and LF on macOS/Linux for byte-identical content: the same commit
+    # produced 15482 bytes on a Windows runner and 15113 on macOS, differing by exactly one byte
+    # per line and nothing else. The reviewed literal can only spell one of those, so comparing
+    # raw bytes made the verifier reject every macOS build. Normalising the separator changes no
+    # field, no value and no ordering -- it cannot hide injected metadata, which is what this
+    # check exists to catch.
+    if _normalize_newlines(wheel_metadata) != _normalize_newlines(reviewed_metadata):
         # Name the first divergence. Package metadata is public by definition, so quoting a
         # line leaks nothing, and a bare "does not match" on a 15KB blob is unactionable --
         # it cost a full CI round trip per guess to narrow down.
         _fail(
             "package metadata is not the reviewed metadata derived from "
             "the trusted README.md: "
-            + _first_metadata_divergence(reviewed_metadata, wheel_metadata)
+            + _first_metadata_divergence(
+                _normalize_newlines(reviewed_metadata),
+                _normalize_newlines(wheel_metadata),
+            )
         )
     shared_runtime = sorted(
         f"Final/{name}" for name in _WHEEL_MODULES | _WHEEL_DATA
