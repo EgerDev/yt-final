@@ -3483,3 +3483,64 @@ def test_a_genuine_missing_sign_in_still_says_so(monkeypatch):
     assert out["ok"] is False
     assert out["code"] == "not_signed_in"
     assert "no YouTube login cookies were found" in out["error"]
+
+
+def test_a_leftover_cookie_snapshot_is_reported_on_the_SUCCESS_path(monkeypatch, tmp_path):
+    """Recording the leftover is pointless if nothing on the success path reads it.
+
+    When the cookies are read but the temporary profile copy cannot be deleted, that copy stays
+    on disk holding a copy of the user's YouTube session. _cdp_client records where it is, and
+    cookie_providers carries the reason across -- but the only reader was the failure branch,
+    which by definition does not run when the login succeeded. So the user was told "Login
+    complete" and never learned a copy of their session had been left behind.
+    """
+    import cookie_providers as cp
+    import cookies_auth
+
+    leftover = (
+        "OSError: read cookies, but could not delete the temporary profile snapshot at "
+        "C:/Temp/ytf_cdp_abc; it holds a copy of your browser cookies and should be deleted "
+        "manually"
+    )
+    exported = tmp_path / "profile.txt"
+    _row = chr(9).join([".youtube.com", "TRUE", "/", "TRUE", "0", "SID", "v"]) + chr(10)
+    exported.write_text(_row, encoding="utf-8")
+    active = tmp_path / "active.txt"
+
+    monkeypatch.setattr(cp, "native_browser_login",
+                        lambda *a, **k: {"ok": True, "browser": "chrome", "profile_dir": "p"})
+    monkeypatch.setattr(cp, "_export_managed_profile", lambda *a, **k: str(exported))
+    monkeypatch.setattr(cp, "last_export_failure", lambda: leftover)
+    monkeypatch.setattr(cookies_auth, "replace_active_cookiefile",
+                        lambda **kw: str(active) if active.write_text(
+                            exported.read_text(encoding="utf-8"), encoding="utf-8") is None else str(active))
+
+    out = webserver.auth_login_session()
+    assert out["ok"] is True, out
+    assert "could not delete the temporary profile snapshot" in out["message"], (
+        "a leftover copy of the user's cookies was not reported on the success path")
+    assert out.get("leftover_snapshot")
+
+
+def test_a_clean_login_does_not_mention_a_leftover(monkeypatch, tmp_path):
+    """Control: with nothing left behind, the success message stays clean."""
+    import cookie_providers as cp
+    import cookies_auth
+
+    exported = tmp_path / "profile.txt"
+    _row = chr(9).join([".youtube.com", "TRUE", "/", "TRUE", "0", "SID", "v"]) + chr(10)
+    exported.write_text(_row, encoding="utf-8")
+    active = tmp_path / "active.txt"
+
+    monkeypatch.setattr(cp, "native_browser_login",
+                        lambda *a, **k: {"ok": True, "browser": "chrome", "profile_dir": "p"})
+    monkeypatch.setattr(cp, "_export_managed_profile", lambda *a, **k: str(exported))
+    monkeypatch.setattr(cp, "last_export_failure", lambda: None)
+    monkeypatch.setattr(cookies_auth, "replace_active_cookiefile",
+                        lambda **kw: str(active) if active.write_text(
+                            exported.read_text(encoding="utf-8"), encoding="utf-8") is None else str(active))
+
+    out = webserver.auth_login_session()
+    assert out["ok"] is True, out
+    assert "snapshot" not in out["message"].lower()
+    assert out.get("leftover_snapshot") is None

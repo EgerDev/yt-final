@@ -268,10 +268,10 @@ Most of the tests are not in `tests/`, which makes the coverage look far thinner
 
 | Path | Contents |
 | --- | --- |
-| `Final/` | the product: 106 Python modules, of which **71 are `test_*.py`** — the pytest suites sit beside the code they cover |
+| `Final/` | the product: 107 Python modules, of which **72 are `test_*.py`** — the pytest suites sit beside the code they cover |
 | `Final/webui/` | the static console served by `yt-final serve` |
 | `Final/examples/` | a sample config and batch manifest |
-| `tests/browser/` | the only tests that are not pytest: one Playwright spec (five cases) plus its fail-closed reporter, run by `npm run test:browser` |
+| `tests/browser/` | the only tests that are not pytest: one Playwright spec (six cases) plus its fail-closed reporter, run by `npm run test:browser` |
 | `scripts/` | release and test tooling — portable build, checksums, `verify_release.py`, published-tree generation, browser-test runners |
 | `requirements/` | hash-locked build, development, and release dependency sets |
 | `docs/` | `CLI.md`, `CONFIGURATION.md`, `TROUBLESHOOTING.md`, `ARCHITECTURE.md`, and `RELEASING.md` |

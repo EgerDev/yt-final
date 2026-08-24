@@ -1601,16 +1601,28 @@ def auth_login_session() -> dict:
         except Exception:
             pass
 
+        message = (
+            f"Login complete via {browser} ({yt_n} cookie row(s) saved). "
+            "Click Test to verify."
+        )
+        # A snapshot that could not be deleted is recorded even when the read SUCCEEDS, and until
+        # now nothing read it on this path: the reason was written to a module global that only the
+        # failure branch above ever looked at. The leftover directory holds a copy of the user's
+        # YouTube session, so telling them about it is the entire reason it is recorded.
+        leftover = cp.last_export_failure()
+        if leftover and "could not delete the temporary profile snapshot" in leftover:
+            message += f" Note: {leftover}"
+
         return {
             "ok": True,
             "path": str(active),
             "source": "profile",
             "browser": browser,
             "youtube_cookies": yt_n,
-            "message": (
-                f"Login complete via {browser} ({yt_n} cookie row(s) saved). "
-                "Click Test to verify."
-            ),
+            "leftover_snapshot": leftover if (
+                leftover and "could not delete the temporary profile snapshot" in leftover
+            ) else None,
+            "message": message,
         }
     except Exception as e:
         return {"ok": False, "error": str(e)}

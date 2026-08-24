@@ -37,10 +37,14 @@ You can also hand cookies over per-run with `--cookies ~/cookies.txt`. Keep that
 file **outside** the working directory — it is a live login session, not a
 config file.
 
-### You signed in, but the app says no cookies were found
+### "The login profile could not be read back"
 
-If the Login window opened, you signed into YouTube, closed it, and the app still
-reports no login — the sign-in probably worked and the *read-back* failed.
+If the Login window opened, you signed into YouTube, closed it, and the app
+reports that it could not read the login profile back, the sign-in worked and the
+*read-back* failed. The app names the underlying reason in that message.
+
+(If instead it says no YouTube login cookies were found, the sign-in itself did
+not complete — sign in fully in that window before quitting it.)
 
 The app refuses to read a browser profile whose directory can be modified by
 anyone other than you. That is deliberate: a profile another account can write
@@ -68,6 +72,44 @@ icacls "$env:USERPROFILE\.yt_final" /inheritance:r /grant "$env:USERNAME:(OI)(CI
 
 Then run Login again. Importing a `cookies.txt` works regardless, and is the
 quickest way past this if you would rather not touch permissions.
+
+### The app says it could not delete a temporary profile snapshot
+
+The message names a folder and says it holds a copy of your browser cookies.
+Your login worked — the cookies were read and saved. Only the throwaway copy the
+app makes to read them could not be removed.
+
+To read a profile without fighting the running browser, the app copies the
+cookie-bearing parts of it into a temporary folder, reads that, and deletes it.
+On Windows the delete can fail permanently: Chrome creates `Cache` and
+`Shared Dictionary` inside that copy with permissions naming only an internal
+Chrome identity, so your own account ends up with no entry at all. You still
+*own* the folder, which is what lets you fix it, but nothing can delete it as-is
+— and retrying does not help, because nothing about it is temporary.
+
+The app used to throw the cookies away when this happened. That protected
+nothing, since the folder stayed on disk either way, and it meant a sign-in that
+had actually succeeded was reported as a failure. It now keeps the cookies and
+tells you where the leftover is.
+
+It is worth removing, because it contains a copy of your YouTube session. Grant
+yourself access first, then delete it:
+
+```powershell
+$leftover = "<the path from the message>"
+icacls $leftover /grant "$env:USERNAME:(OI)(CI)F" /T /C
+Remove-Item -LiteralPath $leftover -Recurse -Force
+```
+
+They accumulate one per sign-in, so if you have logged in several times before
+seeing this, check for siblings:
+
+```powershell
+Get-ChildItem "$env:LOCALAPPDATA\Temp" -Directory -Filter "ytf_cdp_*"
+```
+
+The app builds these under the local app-data `Temp` folder specifically, which is
+usually what `%TEMP%` points at but does not have to be.
 
 ### "This video is age-restricted"
 

@@ -4,7 +4,38 @@ All notable changes will be documented here.
 
 ## [Unreleased]
 
-No unreleased user-facing changes.
+### Fixed
+
+- "Login with Chrome" no longer reports a failure after a sign-in that worked.
+  To read a profile without fighting the running browser the app copies it to a
+  temporary folder, and on Windows that copy often cannot be deleted afterwards:
+  Chrome creates `Cache` and `Shared Dictionary` inside it with permissions
+  naming only an internal Chrome identity, so the owning account has no entry.
+  A failed cleanup discarded a complete, valid cookie set. It now keeps the
+  cookies and reports where the leftover folder is, since that folder holds a
+  copy of your session. A browser that could not be terminated still fails
+  closed and returns nothing.
+- A login profile the app could not read back is now reported as exactly that,
+  with the underlying reason, instead of "no cookies were found". The old
+  wording sent people to sign in again, which is the one thing that cannot fix a
+  directory-permissions problem.
+- "Test cookies" now answers in about two seconds instead of nearly two minutes.
+  The check let `yt-dlp` request a PO token once per client, and a provider that
+  is installed but failing is retried every time; the check only needs to know
+  whether the stored cookies unlock an age-gated video, which one client answers
+  without a token. Measured 111.6s to 1.8s for the same verdict.
+- A "Sign in to confirm you're not a bot" challenge is no longer reported as a
+  failed login. It is a rate limit on the connection, not a signed-out session,
+  and reporting it as one sent people to re-authenticate when that could not
+  help. A genuine age gate still reports a signed-out session.
+- The password field is no longer cleared while it is being typed into. A
+  session check that resolved after the login screen appeared reset the field,
+  so the next attempt submitted an empty password and the screen never
+  unlocked.
+- `pip install .` works again. `pyproject.toml` declared both a license
+  expression and the superseded license classifier, and current `setuptools`
+  rejects that combination outright, so every install and every packaging build
+  stopped before it began.
 
 ## [1.0.0] - 2026-07-29
 

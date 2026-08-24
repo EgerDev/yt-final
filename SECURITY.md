@@ -55,6 +55,14 @@ the file. They do not inherit their parent directory's permissions, so they are
 not exposed to `SYSTEM`, `Administrators`, or other local accounts. Cookie
 replacement and durable state writes use locked, flushed, atomic replacement.
 
+Reading a Chromium browser copies the cookie-bearing parts of its profile into a
+temporary directory, created owner-only the same way, and deletes it afterwards.
+On Windows that deletion frequently cannot succeed: Chrome creates subdirectories
+inside the copy with permissions naming only an internal Chrome identity, leaving
+the owning user without an entry. The copy is not readable by other accounts, but
+it does persist, so the application reports where it was left rather than
+discarding a login that worked.
+
 Cookies remain local except when sent to the authenticated video service
 selected by the user. Normal logs redact credential-bearing URLs, cookies,
 webhook secrets, proxy details, and unnecessary absolute paths. Users remain

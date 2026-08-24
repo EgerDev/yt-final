@@ -1,6 +1,6 @@
 # yt_final architecture
 
-`Final/` contains 106 Python files: 35 application modules and 71 `test_*`
+`Final/` contains 107 Python files: 35 application modules and 72 `test_*`
 modules. This document maps each of the 35 to a layer and says which file holds
 which major class, so a reviewer does not have to open all of them to find out
 where a concern lives.
@@ -40,22 +40,22 @@ small enough to read in a sitting.
 
 | Module | Lines |
 | --- | --- |
-| `Final/yt_final.py` | 9419 |
-| `Final/webserver.py` | 3652 |
-| `Final/_cdp_client.py` | 2859 |
+| `Final/yt_final.py` | 9495 |
+| `Final/webserver.py` | 3768 |
+| `Final/_cdp_client.py` | 2911 |
 | `Final/ffmpeg_updater.py` | 1786 |
 | `Final/optional_tools.py` | 1421 |
 | `Final/jobstore.py` | 1142 |
 | `Final/capability.py` | 872 |
 | `Final/watch_filters.py` | 778 |
-| `Final/cookies_auth.py` | 680 |
+| `Final/cookies_auth.py` | 702 |
 | `Final/watchstore.py` | 657 |
 | `Final/notifications.py` | 611 |
 | `Final/jobspec.py` | 585 |
 | `Final/secureio.py` | 557 |
 | `Final/state_validation.py` | 504 |
 
-The web UI is not Python and is not in that table: `Final/webui/app.js` is 5812
+The web UI is not Python and is not in that table: `Final/webui/app.js` is 5827
 lines, which makes it the second-largest file in the wheel after `yt_final.py`.
 
 Two of the four heaviest modules — `_cdp_client.py` and `ffmpeg_updater.py` —
@@ -152,7 +152,9 @@ The browser half of this tier is `Final/webui/` (`index.html`, `app.js`,
 
 Most of this writes under `~/.yt_final/` — the queue, the watch store, the
 config, the cookie store. The operational log `final_yt.log` is the exception:
-it is opened as a relative path, so it lands in the working directory. The
+it goes to the OS app-data directory instead, or wherever `YT_FINAL_LOG` points.
+It used to be opened as a relative path at import time, which scattered a log
+file into whatever directory the shell happened to be in. The
 shared discipline is: atomic replace, owner-only from the first byte, validate
 before trusting, and never rewrite a document just because it parsed.
 

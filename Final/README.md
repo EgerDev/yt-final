@@ -259,16 +259,18 @@ The tool tries these methods in order:
 
 2. **Tier 2: Managed native-browser profile** (single interactive login, persisted)
    - One-time login via `python yt_final.py auth login` (opens a browser, you log in, then closes)
-   - Profile saved to `~/.yt_final/cookies/profile/`
+   - Profile saved to `~/.yt_final/cookies/yt_final_chrome/`
    - Requires an installed **Chrome, Edge, or Brave** (the login opens your real browser; Google blocks automated ones). Playwright is not required.
    - Reused on subsequent runs until invalidated
 
 3. **Tier 3: Auto-extract from browser** (slow, reads live browser cookies)
    - Firefox: extracts directly and works out of the box (no login profile of its own)
    - Chrome/Edge/Brave: **experimental/best-effort**. Windows app-bound cookie
-     encryption often prevents the throwaway debugging profile from returning
-     any cookies, in which case this tier silently yields nothing and the
-     manager falls through. If auto-extract doesn't work for your Chromium
+     encryption can prevent the throwaway debugging profile from returning any
+     cookies, in which case this tier logs which browsers it tried, yields
+     nothing, and the manager falls through. Cookies it did read are kept even
+     when the temporary copy of the profile cannot be deleted afterwards, which
+     on Windows is the normal outcome rather than the exception. If auto-extract doesn't work for your Chromium
      browser, use the managed profile (`auth login`) or import a `cookies.txt`
      (`auth import`) instead.
    - No extra setup
@@ -327,7 +329,7 @@ This procedure does not make Linux/VPS deployments a supported 1.0.0 target.
 ### Safety & privacy
 
 - **Burner account required**: YouTube ToS prohibits cookie reuse with downloaders. Accounts caught are rate-limited or suspended. Use a dedicated account.
-- **Local plaintext storage**: Cookies live in `~/.yt_final/cookies/` as plaintext with mode 600 (readable by you only). They are not uploaded to yt_final or third-party analytics; cookie values are sent only as part of the authenticated YouTube/Google requests you configure.
+- **Local plaintext storage**: Cookies live in `~/.yt_final/cookies/` as plaintext with mode 600 (readable by you only). They are not uploaded to yt_final or third-party analytics; cookie values are sent only as part of the authenticated YouTube/Google requests you configure. Reading a Chromium browser first copies the profile into a private temporary directory (`%LOCALAPPDATA%\Temp\ytf_cdp_*` on Windows), and that copy contains cookies too. It is deleted afterwards where the platform allows it; on Windows it often cannot be, and the app then tells you where it was left so you can remove it.
 - **No credential automation**: yt_final never types your password. Tier 2 (managed profile) opens a browser *you* control; you log in yourself, then it saves your persistent cookies.
 - **Tier 2 uses your installed browser**: The one-time managed login opens a native Chrome, Edge, or Brave window that you control; Playwright is not required. Tier 1 (cookies.txt) also has no extra dependencies.
 

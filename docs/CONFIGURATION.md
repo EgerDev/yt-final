@@ -32,8 +32,9 @@ There are two roots, and only one of them is redirectable.
 `%LOCALAPPDATA%\yt_final` on Windows, `~/Library/Caches/yt_final` and
 `~/Library/Application Support/yt_final` on macOS. It holds the capability cache
 (`caps_cache.json`), the update-check throttle, and managed FFmpeg and Node
-installs. Moving your state directory does not move these; they are rebuildable
-caches and platform-managed tool installs, not user data.
+installs. The operational log `final_yt.log` goes here too unless `YT_FINAL_LOG`
+points elsewhere. Moving your state directory does not move these; they are
+rebuildable caches, a log, and platform-managed tool installs, not user data.
 
 Two paths are built from `~` directly and stay in `~/.yt_final` even when
 `YT_FINAL_HOME` is set:
@@ -351,12 +352,13 @@ all.
 | --- | --- | --- |
 | `YT_FINAL_HOME` | `~/.yt_final` | Moves the user state root: queue journal, history ledger, watch store, cookie store, and the `[auth]` / `[network]` `config.toml`. The only supported way to keep state off the home drive. Does not move the OS cache and app-data root, the `--preset` fallback config path, or the default `watch` archive |
 | `YT_FINAL_COOKIES` | unset | Full path to a `cookies.txt`, tried first by cookie auto-discovery and by the `file` provider tier |
+| `YT_FINAL_LOG` | the OS app-data directory | Full path for the operational log `final_yt.log`. Read once at import, before any command runs, so it cannot be set from the CLI. Set it when the app-data directory is not writable — the startup message says so — or to pin the log somewhere predictable |
 | `YT_FINAL_WEBUI_PASSWORD` | a random per-launch password | Overrides the web console unlock password. Set it when you need a stable password across restarts; leave it unset to keep the per-launch random one, which is the safer default. The value is compared in constant time |
 | `YT_FINAL_DESYNC_PORT` | `8799` | Loopback port for the local DPI-desync proxy child process |
 | `YT_FINAL_WATCH_INTERVAL` | `900` | Seconds between automatic channel-watch polls in the web console |
 | `YT_FINAL_NO_CAPS_CACHE` | unset | Any non-empty value disables both reading and writing the GPU capability cache, forcing a fresh probe every run. Useful right after a driver or FFmpeg change |
 
-`YT_FINAL_CANCEL` looks like a seventh variable if you grep for the prefix. It
+`YT_FINAL_CANCEL` looks like an eighth variable if you grep for the prefix. It
 is not one: it is the sentinel text carried inside the `DownloadCancelled`
 exception so every layer can recognize a cancellation. Setting it in the
 environment does nothing.

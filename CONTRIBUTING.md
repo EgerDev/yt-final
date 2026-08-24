@@ -87,8 +87,10 @@ has its own commands.
 
 Set `DEV_PYTHON` to the absolute path of the environment's interpreter. The
 harness starts the server from a directory outside the checkout, so a relative
-path resolves somewhere else, and an unset variable stops the run instead of
-quietly testing whichever `python` is on PATH.
+path resolves somewhere else. Setting it is on you: with `DEV_PYTHON` unset the
+config falls back to `PYTHON` and then to bare `python`, so the gate will run
+against whichever interpreter is on PATH and report a perfectly green result for
+an environment you did not mean to test.
 
 npm never installs browser engines, so install the ones you need explicitly:
 
